@@ -1,0 +1,16 @@
+[Unit]
+Description=Schicchi TradingView Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/schicchi
+Environment="PATH=/opt/schicchi/venv/bin"
+ExecStart=/opt/schicchi/venv/bin/python webhook_server.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
