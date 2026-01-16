@@ -1,13 +1,25 @@
-export default async function HomePage() {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "/api";
+"use client";
 
-  let health: unknown = null;
-  try {
-    const res = await fetch(`${apiBase}/health`, { cache: "no-store" });
-    health = await res.json();
-  } catch {
-    health = { ok: false };
-  }
+import { useEffect, useState } from "react";
+
+export default function HomePage() {
+  const [health, setHealth] = useState<unknown>({ loading: true });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        const json = await res.json();
+        if (!cancelled) setHealth(json);
+      } catch {
+        if (!cancelled) setHealth({ ok: false, error: "fetch_failed" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
