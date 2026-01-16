@@ -31,7 +31,7 @@ class Signal(SQLModel, table=True):
     side: str
     event: str
     signal_time: datetime
-    signal_price: float
+    signal_price: float | None = None
     payload_json: str
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 

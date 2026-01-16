@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -18,6 +18,8 @@ router = APIRouter()
 
 
 class TradingViewWebhookPayload(BaseModel):
+    model_config = {"extra": "allow"}  # accept provider-specific placeholders/fields
+
     token: str
     strategy_id: str
     strategy_name: str | None = None
@@ -25,13 +27,14 @@ class TradingViewWebhookPayload(BaseModel):
     symbol: str
     exchange: str | None = None
 
-    side: Literal["BUY", "SELL"]
-    event: Literal["ENTRY", "EXIT"]
+    # Allow DAVIDDTech naming and/or our canonical events.
+    side: str
+    event: str
 
-    intent_qty_type: Literal["notional_usd", "shares"]
-    intent_qty_value: float = Field(gt=0)
+    intent_qty_type: str
+    intent_qty_value: Any = Field(default=None)
 
-    signal_price: float
+    signal_price: Any = Field(default=None)
     signal_time: str
     bar_time: str
 
@@ -44,6 +47,19 @@ def _parse_dt(s: str) -> datetime:
         return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         return datetime.utcnow()
+
+def _to_float(v: Any) -> float | None:
+    # Accept numbers or numeric strings; ignore placeholders like "#close#".
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.strip())
+        except Exception:
+            return None
+    return None
 
 
 def _require_json_only(req: Request) -> None:
@@ -96,7 +112,7 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
             side=payload.side,
             event=payload.event,
             signal_time=_parse_dt(payload.signal_time),
-            signal_price=float(payload.signal_price),
+            signal_price=_to_float(payload.signal_price),
             payload_json=raw_payload_json,
         )
         s.add(sig)
@@ -107,8 +123,8 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
             strategy_id=payload.strategy_id,
             symbol=payload.symbol,
             side=payload.side,
-            notional=payload.intent_qty_value if payload.intent_qty_type == "notional_usd" else None,
-            qty=payload.intent_qty_value if payload.intent_qty_type == "shares" else None,
+            notional=_to_float(payload.intent_qty_value) if payload.intent_qty_type == "notional_usd" else None,
+            qty=_to_float(payload.intent_qty_value) if payload.intent_qty_type == "shares" else None,
             status="received_signal",
         )
         s.add(order)
