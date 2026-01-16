@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-schicchi}
+      POSTGRES_USER: ${POSTGRES_USER:-schicchi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-schicchi_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - schicchi_pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      # Keep this consistent with POSTGRES_* above; override DATABASE_URL in your .env if you prefer.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-schicchi}:${POSTGRES_PASSWORD:-schicchi_dev_password}@db:5432/${POSTGRES_DB:-schicchi}}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change_me}
+      ALPACA_KEY: ${ALPACA_KEY:-}
+      ALPACA_SECRET: ${ALPACA_SECRET:-}
+      ALPACA_BASE_URL: ${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}
+      ALPACA_DATA_URL: ${ALPACA_DATA_URL:-https://data.alpaca.markets}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-/api}
+    environment:
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-/api}
+      UI_BASIC_AUTH_USER: ${UI_BASIC_AUTH_USER:-otto}
+      UI_BASIC_AUTH_PASSWORD: ${UI_BASIC_AUTH_PASSWORD:-change_me}
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - web
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  schicchi_pgdata:
+  caddy_data:
+  caddy_config:
+

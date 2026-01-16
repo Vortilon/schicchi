@@ -2,6 +2,8 @@
 
 A comprehensive Python Streamlit web application for backtesting, optimizing, forward testing, and tracking multiple intraday trading strategies on stocks.
 
+**Deployed on server for global access.**
+
 ## Features
 
 - **Strategy Backtesting**: Test RSI Pullback and Bollinger Band Squeeze Breakout strategies on historical intraday data

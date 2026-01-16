@@ -1,0 +1,68 @@
+//@version=5
+// Schicchi RSI Pullback Strategy for TradingView
+// This strategy sends webhook alerts to your server
+
+strategy("Schicchi RSI Pullback", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// ========== Strategy Parameters ==========
+rsi_period = input.int(10, title="RSI Period", minval=1)
+oversold = input.int(40, title="Oversold Level", minval=1, maxval=100)
+overbought = input.int(75, title="Overbought Level", minval=1, maxval=100)
+volume_filter = input.float(1.5, title="Volume Filter (x average)", minval=1.0)
+atr_multiplier_stop = input.float(2.0, title="ATR Multiplier (Stop Loss)", minval=0.5)
+atr_multiplier_target = input.float(3.0, title="ATR Multiplier (Take Profit)", minval=0.5)
+
+// ========== Technical Indicators ==========
+rsi = ta.rsi(close, rsi_period)
+atr = ta.atr(14)
+avg_volume = ta.sma(volume, 20)
+
+// ========== Entry/Exit Conditions ==========
+volume_condition = volume > avg_volume * volume_filter
+long_entry = rsi < oversold and volume_condition and close > close[1]
+long_exit = rsi > overbought
+
+// ========== Strategy Logic ==========
+if (long_entry)
+    strategy.entry("Long", strategy.long)
+    stop_loss_price = close - (atr * atr_multiplier_stop)
+    take_profit_price = close + (atr * atr_multiplier_target)
+    strategy.exit("Exit", "Long", stop=stop_loss_price, limit=take_profit_price)
+
+if (long_exit)
+    strategy.close("Long")
+
+// ========== Visual Indicators ==========
+plotshape(long_entry, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, title="Entry Signal")
+plotshape(long_exit, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, title="Exit Signal")
+hline(oversold, "Oversold", color=color.blue, linestyle=hline.style_dashed)
+hline(overbought, "Overbought", color=color.red, linestyle=hline.style_dashed)
+
+// ========== Alert Messages ==========
+// These will be sent to your webhook server
+
+// Entry Alert - Use this JSON in TradingView alert message:
+// {
+//     "symbol": "{{ticker}}",
+//     "action": "buy",
+//     "price": {{close}},
+//     "strategy": "rsi_pullback",
+//     "timestamp": "{{time}}",
+//     "stop_loss": {{close}} - ({{ta.atr(14)}} * 2.0),
+//     "take_profit": {{close}} + ({{ta.atr(14)}} * 3.0),
+//     "quantity": 10,
+//     "alert_id": "{{time}}_{{ticker}}_entry"
+// }
+
+// Exit Alert - Use this JSON in TradingView alert message:
+// {
+//     "symbol": "{{ticker}}",
+//     "action": "close",
+//     "price": {{close}},
+//     "strategy": "rsi_pullback",
+//     "timestamp": "{{time}}",
+//     "alert_id": "{{time}}_{{ticker}}_exit"
+// }
+
+alertcondition(long_entry, title="Schicchi Long Entry", message='{"symbol":"{{ticker}}","action":"buy","price":{{close}},"strategy":"rsi_pullback","timestamp":"{{time}}","stop_loss":{{close}}*0.95,"take_profit":{{close}}*1.10,"quantity":10,"alert_id":"{{time}}_{{ticker}}"}')
+alertcondition(long_exit, title="Schicchi Long Exit", message='{"symbol":"{{ticker}}","action":"close","price":{{close}},"strategy":"rsi_pullback","timestamp":"{{time}}","alert_id":"{{time}}_{{ticker}}_exit"}')

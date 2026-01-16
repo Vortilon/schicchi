@@ -1,0 +1,33 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from .db import init_db
+from .routers.health import router as health_router
+from .routers.webhook_tradingview import limiter, router as tv_router
+from .settings import settings
+
+
+app = FastAPI(title="Schicchi Forward Testing API", version="0.1.0")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+
+app.include_router(health_router, prefix="/api", tags=["health"])
+app.include_router(tv_router, prefix="/api", tags=["webhook"])
+

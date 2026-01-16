@@ -11,7 +11,7 @@ ssh root@167.88.36.83
 ```bash
 cd /opt  # or your preferred location
 git clone git@github.com:Vortilon/schicchi.git
-cd schicchi/schicchi
+cd schicchi
 ```
 
 ### Install dependencies:

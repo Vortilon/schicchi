@@ -91,15 +91,34 @@ def webhook():
         alpaca = get_alpaca_client()
         
         try:
-            # Handle close action - close existing open positions
-            if alert['action'] in ['close', 'sell'] and alert['action'] == 'close':
+            # Handle close actions - close existing open positions
+            instruction = alert['instruction']
+            if instruction in ['close', 'sell', 'cover']:
                 # Find open trade for this symbol and strategy
-                open_trade = session.query(Trade).filter_by(
-                    symbol=alert['symbol'],
-                    strategy_name=strategy_name,
-                    status='open',
-                    forward_test=True
-                ).first()
+                # For 'sell', close long positions; for 'cover', close short positions
+                if instruction == 'sell':
+                    open_trade = session.query(Trade).filter_by(
+                        symbol=alert['symbol'],
+                        strategy_name=strategy_name,
+                        side='long',
+                        status='open',
+                        forward_test=True
+                    ).first()
+                elif instruction == 'cover':
+                    open_trade = session.query(Trade).filter_by(
+                        symbol=alert['symbol'],
+                        strategy_name=strategy_name,
+                        side='short',
+                        status='open',
+                        forward_test=True
+                    ).first()
+                else:  # 'close' - close any open position
+                    open_trade = session.query(Trade).filter_by(
+                        symbol=alert['symbol'],
+                        strategy_name=strategy_name,
+                        status='open',
+                        forward_test=True
+                    ).first()
                 
                 if open_trade:
                     # Execute sell order via Alpaca
@@ -112,10 +131,12 @@ def webhook():
                             
                             if position:
                                 qty = abs(position['qty'])
+                                # For 'sell' (close long), use 'sell'. For 'cover' (close short), use 'buy'
+                                alpaca_close_side = 'sell' if instruction == 'sell' else 'buy'
                                 order_result = alpaca.place_order(
                                     symbol=alert['symbol'],
                                     qty=qty,
-                                    side='sell',
+                                    side=alpaca_close_side,
                                     order_type='market'
                                 )
                         except Exception as e:
@@ -146,7 +167,11 @@ def webhook():
                 else:
                     return jsonify({'error': f'No open position found for {alert["symbol"]}'}), 404
             
-            # Handle buy/sell (open position) action
+            # Handle buy/short (open position) actions
+            instruction = alert['instruction']
+            if instruction not in ['buy', 'short', 'long', 'sell_short']:
+                return jsonify({'error': f'Invalid instruction for opening position: {instruction}. Use buy/short for entries, sell/cover for exits.'}), 400
+            
             # Get or create strategy
             strategy = session.query(Strategy).filter_by(name=strategy_name).first()
             if not strategy:
@@ -171,17 +196,23 @@ def webhook():
                 entry_time = datetime.utcnow()
             
             # Determine side
-            side = 'long' if alert['action'] in ['buy', 'long'] else 'short'
+            if instruction in ['buy', 'long']:
+                side = 'long'
+            elif instruction in ['short', 'sell_short']:
+                side = 'short'
+            else:
+                side = 'long'  # Default
             
             # Execute order via Alpaca
             order_result = None
             if alpaca:
                 try:
-                    order_side = 'buy' if side == 'long' else 'sell'
+                    # For Alpaca: 'buy' for long, 'sell' for short
+                    alpaca_side = 'buy' if side == 'long' else 'sell'
                     order_result = alpaca.place_order(
                         symbol=alert['symbol'],
                         qty=alert['quantity'],
-                        side=order_side,
+                        side=alpaca_side,
                         order_type='market'
                     )
                 except Exception as e:

@@ -1,0 +1,91 @@
+//@version=5
+// Schicchi Moving Average Crossover Strategy
+// Simple and profitable strategy for stocks
+// Generates: Buy, Sell, Short, Cover signals
+
+strategy("Schicchi MA Crossover", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=10)
+
+// ========== Strategy Parameters ==========
+fast_length = input.int(9, title="Fast MA Period", minval=1)
+slow_length = input.int(21, title="Slow MA Period", minval=1)
+rsi_period = input.int(14, title="RSI Period", minval=1)
+rsi_oversold = input.int(30, title="RSI Oversold", minval=1, maxval=50)
+rsi_overbought = input.int(70, title="RSI Overbought", minval=50, maxval=100)
+use_rsi_filter = input.bool(true, title="Use RSI Filter")
+strategy_name = input.string("ma_crossover", title="Strategy Name (for webhook)", group="Webhook Settings")
+fixed_qty = input.int(10, title="Fixed Quantity", minval=1, group="Webhook Settings")
+
+// ========== Technical Indicators ==========
+fast_ma = ta.sma(close, fast_length)
+slow_ma = ta.sma(close, slow_length)
+rsi = ta.rsi(close, rsi_period)
+
+// Plot MAs on chart
+plot(fast_ma, "Fast MA", color=color.blue, linewidth=2)
+plot(slow_ma, "Slow MA", color=color.red, linewidth=2)
+
+// ========== Entry/Exit Conditions ==========
+// Long Entry: Fast MA crosses above Slow MA (bullish crossover)
+long_entry = ta.crossover(fast_ma, slow_ma)
+long_entry_filtered = use_rsi_filter ? (long_entry and rsi < rsi_overbought) : long_entry
+
+// Long Exit: Fast MA crosses below Slow MA (bearish crossover) OR RSI overbought
+long_exit_cross = ta.crossunder(fast_ma, slow_ma)
+long_exit_rsi = rsi > rsi_overbought
+long_exit = long_exit_cross or long_exit_rsi
+
+// Short Entry: Fast MA crosses below Slow MA (bearish crossover)
+short_entry = ta.crossunder(fast_ma, slow_ma)
+short_entry_filtered = use_rsi_filter ? (short_entry and rsi > rsi_oversold) : short_entry
+
+// Short Exit: Fast MA crosses above Slow MA (bullish crossover) OR RSI oversold
+short_exit_cross = ta.crossover(fast_ma, slow_ma)
+short_exit_rsi = rsi < rsi_oversold
+short_exit = short_exit_cross or short_exit_rsi
+
+// ========== Strategy Logic ==========
+// Long positions
+if (long_entry_filtered)
+    strategy.entry("Long", strategy.long, qty=fixed_qty)
+
+if (long_exit)
+    strategy.close("Long")
+
+// Short positions
+if (short_entry_filtered)
+    strategy.entry("Short", strategy.short, qty=fixed_qty)
+
+if (short_exit)
+    strategy.close("Short")
+
+// ========== Visual Markers on Chart ==========
+// Long entry markers (green triangle up)
+plotshape(long_entry_filtered, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.normal, title="Long Entry")
+
+// Long exit markers (red triangle down)
+plotshape(long_exit and strategy.position_size > 0, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.normal, title="Long Exit")
+
+// Short entry markers (orange triangle down)
+plotshape(short_entry_filtered, style=shape.triangledown, location=location.abovebar, color=color.orange, size=size.normal, title="Short Entry")
+
+// Short exit markers (blue triangle up)
+plotshape(short_exit and strategy.position_size < 0, style=shape.triangleup, location=location.belowbar, color=color.blue, size=size.normal, title="Short Exit")
+
+// ========== Background Color for Trend ==========
+bgcolor(fast_ma > slow_ma ? color.new(color.green, 95) : color.new(color.red, 95), title="Trend")
+
+// ========== Alert Messages for Webhook ==========
+// These JSON messages will be sent to your webhook server
+// Note: PineScript requires message to be a const string, so we use TradingView variables directly
+
+// Long Entry Alert - Buy Signal
+alertcondition(long_entry_filtered, title="Long Entry", message='{"strategy":"ma_crossover","symbol":"{{ticker}}","price":{{close}},"instruction":"buy","qty":10,"timestamp":"{{time}}","alert_id":"{{time}}_{{ticker}}_long_entry"}')
+
+// Long Exit Alert - Sell Signal
+alertcondition(long_exit and strategy.position_size > 0, title="Long Exit", message='{"strategy":"ma_crossover","symbol":"{{ticker}}","price":{{close}},"instruction":"sell","qty":10,"timestamp":"{{time}}","alert_id":"{{time}}_{{ticker}}_long_exit"}')
+
+// Short Entry Alert - Short Signal
+alertcondition(short_entry_filtered, title="Short Entry", message='{"strategy":"ma_crossover","symbol":"{{ticker}}","price":{{close}},"instruction":"short","qty":10,"timestamp":"{{time}}","alert_id":"{{time}}_{{ticker}}_short_entry"}')
+
+// Short Exit Alert - Cover Signal
+alertcondition(short_exit and strategy.position_size < 0, title="Short Exit", message='{"strategy":"ma_crossover","symbol":"{{ticker}}","price":{{close}},"instruction":"cover","qty":10,"timestamp":"{{time}}","alert_id":"{{time}}_{{ticker}}_short_exit"}')
