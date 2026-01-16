@@ -1,16 +1,23 @@
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-schicchi}
       POSTGRES_USER: ${POSTGRES_USER:-schicchi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-schicchi_dev_password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-schicchi} -d ${POSTGRES_DB:-schicchi}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     volumes:
       - schicchi_pgdata:/var/lib/postgresql/data
 
   api:
     build:
       context: ./apps/api
+    restart: unless-stopped
     environment:
       # Keep this consistent with POSTGRES_* above; override DATABASE_URL in your .env if you prefer.
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-schicchi}:${POSTGRES_PASSWORD:-schicchi_dev_password}@db:5432/${POSTGRES_DB:-schicchi}}
@@ -29,6 +36,7 @@ services:
       context: ./apps/web
       args:
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-/api}
+    restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-/api}
       UI_BASIC_AUTH_USER: ${UI_BASIC_AUTH_USER:-otto}
@@ -38,6 +46,7 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    restart: unless-stopped
     depends_on:
       - web
       - api
