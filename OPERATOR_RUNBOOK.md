@@ -128,6 +128,16 @@ docker compose -f docker-compose.yml -f docker-compose.prod-ports.yml up -d --bu
 
 ---
 
+## Local dev ports (optional)
+
+If running locally and you want direct port access:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev-ports.yml up -d --build
+```
+
+---
+
 ## 5) Verify containers are running
 
 ```bash
