@@ -54,13 +54,14 @@ def _require_json_only(req: Request) -> None:
 
 @router.post("/webhook/tradingview")
 @limiter.limit("30/minute")
-async def tradingview_webhook(req: Request, payload: TradingViewWebhookPayload):
-    _require_json_only(req)
+async def tradingview_webhook(request: Request, payload: TradingViewWebhookPayload):
+    # NOTE: SlowAPI requires the parameter name to be exactly "request" (or "websocket").
+    _require_json_only(request)
 
     log = WebhookRequestLog(
-        remote_ip=req.client.host if req.client else None,
-        user_agent=req.headers.get("user-agent"),
-        content_type=req.headers.get("content-type"),
+        remote_ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        content_type=request.headers.get("content-type"),
         ok=False,
     )
 
