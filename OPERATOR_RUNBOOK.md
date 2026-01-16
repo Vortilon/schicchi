@@ -123,7 +123,7 @@ Only use this if nothing else on the VPS needs ports 80/443:
 
 ```bash
 cd /opt/schicchi-ft
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.prod-ports.yml up -d --build
 ```
 
 ---
