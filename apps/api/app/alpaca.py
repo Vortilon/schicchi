@@ -5,7 +5,7 @@ from typing import Any
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 
 from .settings import settings
 
@@ -24,25 +24,42 @@ def trading_client() -> TradingClient:
     return TradingClient(settings.alpaca_key, settings.alpaca_secret, paper="paper" in settings.alpaca_base_url)
 
 
-def submit_market_order(
+def submit_order(
     *,
     symbol: str,
     side: str,
     client_order_id: str,
     qty: float | None,
     notional: float | None,
+    order_type: str = "market",
+    limit_price: float | None = None,
+    time_in_force: str = "day",
 ) -> dict[str, Any]:
     client = trading_client()
     order_side = OrderSide.BUY if side.upper() == "BUY" else OrderSide.SELL
 
-    req = MarketOrderRequest(
-        symbol=symbol,
-        side=order_side,
-        time_in_force=TimeInForce.DAY,
-        client_order_id=client_order_id,
-        qty=qty,
-        notional=notional,
-    )
+    tif = TimeInForce.GTC if time_in_force.lower() == "gtc" else TimeInForce.DAY
+
+    if order_type.lower() == "limit":
+        if limit_price is None:
+            raise ValueError("limit_price is required for limit orders")
+        req = LimitOrderRequest(
+            symbol=symbol,
+            side=order_side,
+            time_in_force=tif,
+            client_order_id=client_order_id,
+            qty=qty,
+            limit_price=limit_price,
+        )
+    else:
+        req = MarketOrderRequest(
+            symbol=symbol,
+            side=order_side,
+            time_in_force=tif,
+            client_order_id=client_order_id,
+            qty=qty,
+            notional=notional,
+        )
     order = client.submit_order(order_data=req)
     # Return a plain dict so we can JSON-store it easily
     return {

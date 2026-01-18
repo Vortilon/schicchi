@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from .alpaca_stream import AlpacaTradeUpdatesStreamer
 from .db import init_db
 from .routers.health import router as health_router
 from .routers.alpaca_sync import router as alpaca_router
@@ -27,10 +28,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+streamer: AlpacaTradeUpdatesStreamer | None = None
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
+    global streamer
+    try:
+        if settings.alpaca_key and settings.alpaca_secret:
+            streamer = AlpacaTradeUpdatesStreamer()
+            await streamer.start()
+    except Exception:
+        # Don't prevent API from starting if stream cannot connect.
+        streamer = None
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    global streamer
+    if streamer:
+        await streamer.stop()
+        streamer = None
 
 
 app.include_router(health_router, prefix="/api", tags=["health"])

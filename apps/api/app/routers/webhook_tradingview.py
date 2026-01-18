@@ -8,7 +8,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlmodel import Session, select
 
-from ..alpaca import submit_market_order
+from ..alpaca import submit_order
 from ..db import engine
 from ..models import Order, Signal, Strategy, WebhookRequestLog
 from ..settings import settings
@@ -40,6 +40,11 @@ class TradingViewWebhookPayload(BaseModel):
     bar_time: str
 
     trade_id: str
+
+    # Optional order params (useful for testing when market is closed)
+    order_type: str | None = None  # "market" | "limit"
+    limit_price: Any = Field(default=None)
+    time_in_force: str | None = None  # "day" | "gtc"
 
 
 def _parse_dt(s: str) -> datetime:
@@ -133,12 +138,15 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
 
         # Submit to Alpaca for real execution (paper now).
         try:
-            alpaca_resp = submit_market_order(
+            alpaca_resp = submit_order(
                 symbol=payload.symbol,
                 side=payload.side,
                 client_order_id=payload.trade_id,
                 qty=order.qty,
                 notional=order.notional,
+                order_type=(payload.order_type or "market"),
+                limit_price=_to_float(payload.limit_price),
+                time_in_force=(payload.time_in_force or "day"),
             )
             order.alpaca_order_id = alpaca_resp.get("id")
             order.status = alpaca_resp.get("status") or "submitted"

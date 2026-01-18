@@ -52,6 +52,8 @@ export default function DashboardPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [latestTradeId, setLatestTradeId] = useState<string | null>(null);
 
   async function loadAll() {
     const [posRes, stratRes, txRes, acctRes] = await Promise.all([
@@ -69,6 +71,12 @@ export default function DashboardPage() {
     setPositions(Array.isArray(posJson) ? posJson : []);
     setStrategies(Array.isArray(stratJson) ? stratJson : []);
     setTx(Array.isArray(txJson) ? txJson : []);
+    const newest = Array.isArray(txJson) && txJson.length ? txJson[0]?.trade_id : null;
+    if (newest && newest !== latestTradeId) {
+      setLatestTradeId(newest);
+      setToast(`New activity: ${txJson[0]?.symbol} ${txJson[0]?.event} (${txJson[0]?.alpaca_status ?? "no alpaca"})`);
+      setTimeout(() => setToast(null), 5000);
+    }
     setAccount(acctJson?.cash != null ? acctJson : null);
   }
 
@@ -85,6 +93,15 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, []);
+
+  // Lightweight “live” indicator: poll activity every 10s and toast on new newest row.
+  useEffect(() => {
+    const t = setInterval(() => {
+      loadAll().catch(() => {});
+    }, 10000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestTradeId]);
 
   const columns = useMemo<ColumnDef<PositionRow>[]>(
     () => [
@@ -129,6 +146,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {toast ? (
+        <div className="fixed right-6 top-20 z-50 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-lg">
+          {toast}
+        </div>
+      ) : null}
       <div className="flex items-start justify-between gap-4">
         <div>
         <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
