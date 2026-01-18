@@ -5,6 +5,9 @@ from slowapi.errors import RateLimitExceeded
 
 from .db import init_db
 from .routers.health import router as health_router
+from .routers.positions import router as positions_router
+from .routers.strategies import router as strategies_router
+from .routers.trades import router as trades_router
 from .routers.webhook_tradingview import limiter, router as tv_router
 from .settings import settings
 
@@ -30,4 +33,7 @@ def on_startup():
 
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(tv_router, prefix="/api", tags=["webhook"])
+app.include_router(strategies_router, prefix="/api", tags=["strategies"])
+app.include_router(positions_router, prefix="/api", tags=["positions"])
+app.include_router(trades_router, prefix="/api", tags=["trades"])
 
