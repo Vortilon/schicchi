@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from datetime import date, datetime
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -23,6 +24,15 @@ def trading_client() -> TradingClient:
     # alpaca-py expects the base host; we normalize "/v2" away in settings.
     return TradingClient(settings.alpaca_key, settings.alpaca_secret, paper="paper" in settings.alpaca_base_url)
 
+def _jsonable(v: Any) -> Any:
+    if v is None:
+        return None
+    if isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    # Fallback to string for SDK types
+    return str(v)
 
 def submit_order(
     *,
@@ -65,12 +75,12 @@ def submit_order(
     return {
         "id": str(order.id),
         "status": str(order.status),
-        "submitted_at": getattr(order, "submitted_at", None),
-        "filled_at": getattr(order, "filled_at", None),
-        "filled_avg_price": getattr(order, "filled_avg_price", None),
-        "filled_qty": getattr(order, "filled_qty", None),
-        "client_order_id": getattr(order, "client_order_id", None),
-        "symbol": getattr(order, "symbol", None),
-        "side": getattr(order, "side", None),
+        "submitted_at": _jsonable(getattr(order, "submitted_at", None)),
+        "filled_at": _jsonable(getattr(order, "filled_at", None)),
+        "filled_avg_price": _jsonable(getattr(order, "filled_avg_price", None)),
+        "filled_qty": _jsonable(getattr(order, "filled_qty", None)),
+        "client_order_id": _jsonable(getattr(order, "client_order_id", None)),
+        "symbol": _jsonable(getattr(order, "symbol", None)),
+        "side": _jsonable(getattr(order, "side", None)),
     }
 
