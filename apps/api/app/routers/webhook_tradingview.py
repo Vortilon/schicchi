@@ -8,6 +8,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlmodel import Session, select
 
+from ..alpaca import submit_market_order
 from ..db import engine
 from ..models import Order, Signal, Strategy, WebhookRequestLog
 from ..settings import settings
@@ -117,7 +118,7 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
         )
         s.add(sig)
 
-        # MVP: we store an "intended" order record; Alpaca submission/sync comes next.
+        # Store order and attempt Alpaca submission (paper).
         order = Order(
             trade_id=payload.trade_id,
             strategy_id=payload.strategy_id,
@@ -128,11 +129,29 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
             status="received_signal",
         )
         s.add(order)
+        s.commit()
+
+        # Submit to Alpaca for real execution (paper now).
+        try:
+            alpaca_resp = submit_market_order(
+                symbol=payload.symbol,
+                side=payload.side,
+                client_order_id=payload.trade_id,
+                qty=order.qty,
+                notional=order.notional,
+            )
+            order.alpaca_order_id = alpaca_resp.get("id")
+            order.status = alpaca_resp.get("status") or "submitted"
+            order.raw_response_json = json.dumps(alpaca_resp, separators=(",", ":"), ensure_ascii=False)
+        except Exception as e:
+            order.status = "alpaca_error"
+            order.error_message = str(e)
 
         log.ok = True
         log.reason = "ok"
         s.add(log)
 
+        s.add(order)
         s.commit()
 
         return {
@@ -140,6 +159,10 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
             "trade_id": payload.trade_id,
             "strategy_id": payload.strategy_id,
             "stored": {"signal_id": sig.id, "order_id": order.id},
-            "note": "Stored signal + intended order. Alpaca execution/sync will populate alpaca_order_id/fills.",
+            "alpaca": {
+                "alpaca_order_id": order.alpaca_order_id,
+                "status": order.status,
+                "error": order.error_message,
+            },
         }
 

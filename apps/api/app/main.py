@@ -5,6 +5,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .db import init_db
 from .routers.health import router as health_router
+from .routers.alpaca_sync import router as alpaca_router
 from .routers.positions import router as positions_router
 from .routers.strategies import router as strategies_router
 from .routers.trades import router as trades_router
@@ -33,6 +34,7 @@ def on_startup():
 
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(tv_router, prefix="/api", tags=["webhook"])
+app.include_router(alpaca_router, prefix="/api", tags=["alpaca"])
 app.include_router(strategies_router, prefix="/api", tags=["strategies"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(trades_router, prefix="/api", tags=["trades"])

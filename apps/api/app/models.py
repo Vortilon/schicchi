@@ -50,6 +50,8 @@ class Order(SQLModel, table=True):
 
     alpaca_order_id: str | None = Field(default=None, index=True)
     status: str | None = None
+    error_message: str | None = None
+    raw_response_json: str | None = None
     submitted_at: datetime | None = None
     filled_at: datetime | None = None
     filled_avg_price: float | None = None
@@ -64,6 +66,7 @@ class Fill(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     trade_id: str = Field(index=True)
     alpaca_order_id: str = Field(index=True)
+    side: str | None = None
     filled_at: datetime
     filled_qty: float
     filled_price: float
