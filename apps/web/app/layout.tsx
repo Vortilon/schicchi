@@ -1,4 +1,5 @@
 import "./globals.css";
+import Image from "next/image";
 
 export const metadata = {
   title: "Schicchi Forward Testing",
@@ -12,7 +13,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="border-b border-slate-200 bg-white">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
             <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-lg bg-slate-900" />
+              <div className="relative h-8 w-8 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <Image src="/logo.jpeg" alt="Schicchi logo" fill className="object-cover" priority />
+              </div>
               <div className="leading-tight">
                 <div className="text-sm font-semibold text-slate-900">Schicchi</div>
                 <div className="text-xs text-slate-500">Forward Testing</div>
