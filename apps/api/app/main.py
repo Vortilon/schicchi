@@ -9,6 +9,7 @@ from .routers.alpaca_sync import router as alpaca_router
 from .routers.positions import router as positions_router
 from .routers.strategies import router as strategies_router
 from .routers.trades import router as trades_router
+from .routers.transactions import router as transactions_router
 from .routers.webhook_tradingview import limiter, router as tv_router
 from .settings import settings
 
@@ -38,4 +39,5 @@ app.include_router(alpaca_router, prefix="/api", tags=["alpaca"])
 app.include_router(strategies_router, prefix="/api", tags=["strategies"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(trades_router, prefix="/api", tags=["trades"])
+app.include_router(transactions_router, prefix="/api", tags=["transactions"])
 
