@@ -1,16 +1,15 @@
 "use client";
 
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-export default function LoginPage() {
-  const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/dashboard";
+export default function LoginPage({ searchParams }: { searchParams?: { next?: string } }) {
+  // Avoid useSearchParams() to keep Next build/prerender happy in Docker.
+  const next = searchParams?.next || "/dashboard";
 
   const [username, setUsername] = useState("otto");
   const [password, setPassword] = useState("");
@@ -73,10 +72,6 @@ export default function LoginPage() {
             >
               {loading ? "Signing in…" : "Sign in"}
             </Button>
-
-            <div className="text-xs text-slate-500">
-              Tip: if you don’t see the image, upload it as <code>apps/web/public/splash.png</code>.
-            </div>
           </CardContent>
         </Card>
       </div>
