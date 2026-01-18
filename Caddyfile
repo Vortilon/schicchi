@@ -5,6 +5,12 @@
 :80 {
   encode zstd gzip
 
+  # Next.js auth routes live under /api/auth/*
+  @auth path /api/auth/*
+  handle @auth {
+    reverse_proxy web:3000
+  }
+
   @api path /api/*
   handle @api {
     reverse_proxy api:8000

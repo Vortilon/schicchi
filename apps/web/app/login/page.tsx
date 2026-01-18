@@ -19,8 +19,14 @@ export default function LoginPage({ searchParams }: { searchParams?: { next?: st
   return (
     <div className="grid min-h-[70vh] gap-8 md:grid-cols-2">
       <div className="hidden items-center justify-center md:flex">
-        <div className="relative h-[520px] w-full max-w-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <Image src="/splash.png" alt="Splash" fill className="object-cover" priority />
+        <div className="w-full max-w-[620px]">
+          <div className="relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <Image src="/splash.png" alt="Splash" fill className="object-contain p-6" priority />
+          </div>
+          <div className="mt-4 text-center">
+            <div className="text-lg font-semibold text-slate-900">Schicchi</div>
+            <div className="text-sm text-slate-600">Forward Testing Dashboard</div>
+          </div>
         </div>
       </div>
 
