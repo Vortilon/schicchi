@@ -123,6 +123,26 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
         )
         s.add(sig)
 
+        # Idempotency: if we already have an order for this trade_id, do not re-submit to Alpaca.
+        existing_order = s.exec(select(Order).where(Order.trade_id == payload.trade_id)).first()
+        if existing_order:
+            log.ok = True
+            log.reason = "ok_duplicate_trade_id_no_resubmit"
+            s.add(log)
+            s.commit()
+            return {
+                "ok": True,
+                "trade_id": payload.trade_id,
+                "strategy_id": payload.strategy_id,
+                "stored": {"signal_id": sig.id, "order_id": existing_order.id},
+                "alpaca": {
+                    "alpaca_order_id": existing_order.alpaca_order_id,
+                    "status": existing_order.status,
+                    "error": existing_order.error_message,
+                },
+                "note": "Duplicate trade_id: stored signal but did not re-submit order to Alpaca.",
+            }
+
         # Store order and attempt Alpaca submission (paper).
         order = Order(
             trade_id=payload.trade_id,

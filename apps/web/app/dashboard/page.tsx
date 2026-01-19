@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { fmtMoney, fmtPct, numClass } from "@/lib/format";
 
 type PositionRow = {
   id: number;
@@ -144,6 +145,45 @@ export default function DashboardPage() {
     []
   );
 
+  const stratColumns = useMemo<ColumnDef<any>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Strategy",
+        cell: ({ row }) => (
+          <a className="underline underline-offset-4" href={`/strategies/${row.original.id}`}>
+            {row.original.name}
+          </a>
+        )
+      },
+      { accessorKey: "open_positions_count", header: "Open Pos" },
+      { accessorKey: "trades_total", header: "Trades" },
+      { accessorKey: "wins", header: "Wins" },
+      { accessorKey: "losses", header: "Losses" },
+      {
+        id: "pnl_usd",
+        header: "P&L $",
+        cell: ({ row }) => <span className={numClass(row.original.pnl_usd)}>{fmtMoney(row.original.pnl_usd)}</span>
+      },
+      {
+        id: "pnl_pct",
+        header: "P&L %",
+        cell: ({ row }) => <span className={numClass(row.original.pnl_pct)}>{fmtPct(row.original.pnl_pct)}</span>
+      },
+      {
+        id: "bh_pct",
+        header: "B&H %",
+        cell: ({ row }) => <span className={numClass(row.original.buy_hold_pct)}>{fmtPct(row.original.buy_hold_pct)}</span>
+      },
+      {
+        id: "bh_usd",
+        header: "B&H $",
+        cell: ({ row }) => <span className={numClass(row.original.buy_hold_usd)}>{fmtMoney(row.original.buy_hold_usd)}</span>
+      }
+    ],
+    []
+  );
+
   return (
     <div className="space-y-6">
       {toast ? (
@@ -222,7 +262,11 @@ export default function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? <div className="text-sm text-slate-600">Loading…</div> : <DataTable data={positions} columns={columns} />}
+          {loading ? (
+            <div className="text-sm text-slate-600">Loading…</div>
+          ) : (
+            <DataTable data={positions} columns={columns} pageSize={25} searchPlaceholder="Search positions…" />
+          )}
         </CardContent>
       </Card>
 
@@ -232,22 +276,7 @@ export default function DashboardPage() {
           <CardDescription>Active strategies and their current counts (P&amp;L will refine as fills sync matures).</CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="text-sm text-slate-600">Loading…</div>
-          ) : (
-            <div className="text-sm text-slate-700">
-              <ul className="list-disc pl-5">
-                {strategies.map((s) => (
-                  <li key={s.id}>
-                    <a className="underline underline-offset-4" href={`/strategies/${s.id}`}>
-                      {s.name}
-                    </a>{" "}
-                    — open positions: {s.open_positions_count}, P&amp;L: {s.pnl_pct}% (${s.pnl_usd})
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {loading ? <div className="text-sm text-slate-600">Loading…</div> : <DataTable data={strategies} columns={stratColumns} pageSize={25} searchPlaceholder="Search strategies…" />}
         </CardContent>
       </Card>
 
@@ -258,7 +287,13 @@ export default function DashboardPage() {
             Each TradingView signal row shows the paired Alpaca order status (or error).
           </CardDescription>
         </CardHeader>
-        <CardContent>{loading ? <div className="text-sm text-slate-600">Loading…</div> : <DataTable data={tx} columns={txColumns} />}</CardContent>
+        <CardContent>
+          {loading ? (
+            <div className="text-sm text-slate-600">Loading…</div>
+          ) : (
+            <DataTable data={tx} columns={txColumns} pageSize={25} searchPlaceholder="Search activity…" />
+          )}
+        </CardContent>
       </Card>
     </div>
   );

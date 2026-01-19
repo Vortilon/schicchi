@@ -5,6 +5,7 @@ import {
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
+  getPaginationRowModel,
   getSortedRowModel,
   SortingState,
   useReactTable
@@ -19,24 +20,29 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export function DataTable<TData>({
   columns,
   data,
-  searchPlaceholder = "Search…"
+  searchPlaceholder = "Search…",
+  pageSize = 25
 }: {
   columns: ColumnDef<TData, any>[];
   data: TData[];
   searchPlaceholder?: string;
+  pageSize?: number;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize });
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, globalFilter },
+    state: { sorting, globalFilter, pagination },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
+    onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel()
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel()
   });
 
   const headerGroups = useMemo(() => table.getHeaderGroups(), [table]);
@@ -50,7 +56,14 @@ export function DataTable<TData>({
           onChange={(e) => setGlobalFilter(e.target.value)}
           placeholder={searchPlaceholder}
         />
-        <Button variant="outline" onClick={() => setSorting([])}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setSorting([]);
+            setGlobalFilter("");
+            setPagination((p) => ({ ...p, pageIndex: 0 }));
+          }}
+        >
           Reset sort
         </Button>
       </div>
@@ -86,7 +99,11 @@ export function DataTable<TData>({
             rows.map((row) => (
               <TableRow key={row.id}>
                 {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                  <TableCell key={cell.id}>
+                    <div className="max-w-[360px] truncate" title={String(cell.getValue() ?? "")}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </div>
+                  </TableCell>
                 ))}
               </TableRow>
             ))
@@ -99,6 +116,21 @@ export function DataTable<TData>({
           )}
         </TableBody>
       </Table>
+
+      <div className="flex items-center justify-between gap-3 text-sm text-slate-600">
+        <div>
+          Page <span className="font-medium text-slate-900">{table.getState().pagination.pageIndex + 1}</span> of{" "}
+          <span className="font-medium text-slate-900">{table.getPageCount()}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+            Prev
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+            Next
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

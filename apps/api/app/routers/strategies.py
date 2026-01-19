@@ -38,6 +38,8 @@ def list_strategies(active_only: bool = Query(default=False)) -> list[dict[str, 
 
     out: list[dict[str, Any]] = []
     for strat in strategies:
+        strat_orders = by_strategy_orders.get(strat.id, [])
+        trade_ids = sorted({o.trade_id for o in strat_orders if o.trade_id})
         open_positions = [p for p in by_strategy_positions.get(strat.id, []) if p.qty != 0]
         sigs = sorted(by_strategy_signals.get(strat.id, []), key=lambda x: x.signal_time)
         first_sig = sigs[0] if sigs else None
@@ -62,6 +64,9 @@ def list_strategies(active_only: bool = Query(default=False)) -> list[dict[str, 
                 "is_active": strat.is_active,
                 "sizing_type": strat.sizing_type,
                 "open_positions_count": len(open_positions),
+                "trades_total": len(trade_ids),
+                "wins": 0,   # TODO: compute from fills
+                "losses": 0, # TODO: compute from fills
                 "pnl_usd": 0.0,  # TODO: compute from fills
                 "pnl_pct": 0.0,  # TODO: compute from fills / equity curve
                 "buy_hold_basis_usd": bh_basis_usd,
