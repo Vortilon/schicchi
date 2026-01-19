@@ -98,24 +98,6 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
             s.commit()
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    # If placeholders weren't rendered, store the signal but do not attempt Alpaca execution.
-    if _looks_like_unrendered_placeholder(payload.symbol):
-        with Session(engine) as s:
-            s.add(
-                WebhookRequestLog(
-                    remote_ip=request.client.host if request.client else None,
-                    user_agent=request.headers.get("user-agent"),
-                    content_type=request.headers.get("content-type"),
-                    ok=False,
-                    reason="unrendered_placeholders",
-                )
-            )
-            s.commit()
-        raise HTTPException(
-            status_code=400,
-            detail="Unrendered placeholders detected in symbol. Check your TradingView alert message placeholders/format.",
-        )
-
     raw_payload_json = json.dumps(payload.model_dump(), separators=(",", ":"), ensure_ascii=False)
 
     with Session(engine) as s:
@@ -163,6 +145,36 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
                     "error": existing_order.error_message,
                 },
                 "note": "Duplicate trade_id: stored signal but did not re-submit order to Alpaca.",
+            }
+
+        # If placeholders weren't rendered, store an order row but skip Alpaca execution (so it shows in UI).
+        if (
+            _looks_like_unrendered_placeholder(payload.symbol)
+            or _looks_like_unrendered_placeholder(payload.trade_id)
+            or _looks_like_unrendered_placeholder(payload.signal_time)
+            or _looks_like_unrendered_placeholder(payload.bar_time)
+        ):
+            order = Order(
+                trade_id=payload.trade_id,
+                strategy_id=payload.strategy_id,
+                symbol=payload.symbol,
+                side=payload.side,
+                notional=_to_float(payload.intent_qty_value) if payload.intent_qty_type == "notional_usd" else None,
+                qty=_to_float(payload.intent_qty_value) if payload.intent_qty_type == "shares" else None,
+                status="skipped_placeholders",
+                error_message="Unrendered placeholders in payload (TradingView {{...}} or DaviddTech #...#). If using 'Any alert() function call', the Pine script must build the JSON with real values.",
+            )
+            log.ok = False
+            log.reason = "skipped_placeholders"
+            s.add(log)
+            s.add(order)
+            s.commit()
+            return {
+                "ok": True,
+                "trade_id": payload.trade_id,
+                "strategy_id": payload.strategy_id,
+                "stored": {"signal_id": sig.id, "order_id": order.id},
+                "alpaca": {"alpaca_order_id": None, "status": order.status, "error": order.error_message},
             }
 
         # Store order and attempt Alpaca submission (paper).
