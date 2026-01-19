@@ -147,6 +147,32 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
                 "note": "Duplicate trade_id: stored signal but did not re-submit order to Alpaca.",
             }
 
+        # If this is a limit order and the limit_price did not resolve to a number (often because it is a placeholder),
+        # store an order row but skip Alpaca execution (so it shows clearly in the UI).
+        if (payload.order_type or "").lower() == "limit" and _to_float(payload.limit_price) is None:
+            order = Order(
+                trade_id=payload.trade_id,
+                strategy_id=payload.strategy_id,
+                symbol=payload.symbol,
+                side=payload.side,
+                notional=_to_float(payload.intent_qty_value) if payload.intent_qty_type == "notional_usd" else None,
+                qty=_to_float(payload.intent_qty_value) if payload.intent_qty_type == "shares" else None,
+                status="skipped_placeholders",
+                error_message=f"Limit order requested but limit_price did not resolve to a number (got {payload.limit_price!r}). If using DaviddTech, ensure placeholders like #ShortTP1# are rendered before webhook send.",
+            )
+            log.ok = False
+            log.reason = "skipped_limit_price_unresolved"
+            s.add(log)
+            s.add(order)
+            s.commit()
+            return {
+                "ok": True,
+                "trade_id": payload.trade_id,
+                "strategy_id": payload.strategy_id,
+                "stored": {"signal_id": sig.id, "order_id": order.id},
+                "alpaca": {"alpaca_order_id": None, "status": order.status, "error": order.error_message},
+            }
+
         # If placeholders weren't rendered, store an order row but skip Alpaca execution (so it shows in UI).
         if (
             _looks_like_unrendered_placeholder(payload.symbol)
