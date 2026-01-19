@@ -73,6 +73,10 @@ def _require_json_only(req: Request) -> None:
     if "application/json" not in ct:
         raise HTTPException(status_code=415, detail="Content-Type must be application/json")
 
+def _looks_like_unrendered_placeholder(s: str) -> bool:
+    # TradingView placeholders ({{ticker}}) or DaviddTech placeholders (#close#) should never reach the server.
+    return ("{{" in s) or ("}}" in s) or ("#" in s)
+
 
 @router.post("/webhook/tradingview")
 @limiter.limit("30/minute")
@@ -93,6 +97,24 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
             s.add(log)
             s.commit()
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    # If placeholders weren't rendered, store the signal but do not attempt Alpaca execution.
+    if _looks_like_unrendered_placeholder(payload.symbol):
+        with Session(engine) as s:
+            s.add(
+                WebhookRequestLog(
+                    remote_ip=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                    content_type=request.headers.get("content-type"),
+                    ok=False,
+                    reason="unrendered_placeholders",
+                )
+            )
+            s.commit()
+        raise HTTPException(
+            status_code=400,
+            detail="Unrendered placeholders detected in symbol. Check your TradingView alert message placeholders/format.",
+        )
 
     raw_payload_json = json.dumps(payload.model_dump(), separators=(",", ":"), ensure_ascii=False)
 
