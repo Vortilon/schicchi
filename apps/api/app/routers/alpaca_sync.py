@@ -27,6 +27,8 @@ def alpaca_account() -> dict[str, Any]:
     c = _client()
     acct = c.get_account()
     return {
+        "account_number": getattr(acct, "account_number", None),
+        "id": str(getattr(acct, "id", "")) or None,
         "cash": float(acct.cash),
         "equity": float(acct.equity),
         "buying_power": float(acct.buying_power),
@@ -102,8 +104,10 @@ def sync_alpaca() -> dict[str, Any]:
         now = datetime.utcnow()
         # Upsert by (strategy_id, symbol)
         existing = {(p.strategy_id, p.symbol): p for p in s.exec(select(Position))}
+        seen_syms: set[str] = set()
         for ap in alp_positions:
             symbol = ap.symbol
+            seen_syms.add(symbol)
             qty = float(ap.qty)
             avg = float(ap.avg_entry_price)
             key = ("ALPACA", symbol)
@@ -123,6 +127,15 @@ def sync_alpaca() -> dict[str, Any]:
                         last_sync_time=now,
                     )
                 )
+
+        # Mark Alpaca-tracked positions that no longer exist as flat (so the UI matches Alpaca).
+        for (sid, sym), p in existing.items():
+            if sid != "ALPACA":
+                continue
+            if sym not in seen_syms:
+                p.qty = 0.0
+                p.avg_entry_price = p.avg_entry_price
+                p.last_sync_time = now
 
         s.commit()
 

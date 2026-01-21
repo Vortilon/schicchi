@@ -8,7 +8,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlmodel import Session, select
 
-from ..alpaca import submit_order
+from ..alpaca import format_alpaca_error, submit_order
 from ..db import engine
 from ..models import Order, Signal, Strategy, WebhookRequestLog
 from ..settings import settings
@@ -233,7 +233,17 @@ async def tradingview_webhook(request: Request, payload: TradingViewWebhookPaylo
             order.raw_response_json = json.dumps(alpaca_resp, separators=(",", ":"), ensure_ascii=False)
         except Exception as e:
             order.status = "alpaca_error"
-            order.error_message = str(e)
+            msg, raw = format_alpaca_error(
+                e,
+                symbol=payload.symbol,
+                side=payload.side,
+                qty=order.qty,
+                notional=order.notional,
+            )
+            order.error_message = msg
+            # Preserve the raw payload (if we found one) for debugging without showing it in the UI table.
+            if raw is not None:
+                order.raw_response_json = json.dumps(raw, separators=(",", ":"), ensure_ascii=False)
 
         log.ok = True
         log.reason = "ok"

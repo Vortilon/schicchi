@@ -157,7 +157,10 @@ export default function DashboardPage() {
         )
       },
       { accessorKey: "open_positions_count", header: "Open Pos" },
-      { accessorKey: "trades_total", header: "Trades" },
+      { accessorKey: "symbols_traded", header: "Symbols" },
+      { accessorKey: "signals_total", header: "Signals" },
+      { accessorKey: "filled_orders_total", header: "Filled Orders" },
+      { accessorKey: "trades_total", header: "Round-Trip Trades" },
       { accessorKey: "wins", header: "Wins" },
       { accessorKey: "losses", header: "Losses" },
       {
@@ -171,14 +174,26 @@ export default function DashboardPage() {
         cell: ({ row }) => <span className={numClass(row.original.pnl_pct)}>{fmtPct(row.original.pnl_pct)}</span>
       },
       {
+        id: "pf",
+        header: "PF",
+        cell: ({ row }) => (row.original.profit_factor == null ? "-" : Number(row.original.profit_factor).toFixed(2))
+      },
+      {
+        id: "mdd",
+        header: "Max DD",
+        cell: ({ row }) => (row.original.max_drawdown_pct == null ? "-" : fmtPct(row.original.max_drawdown_pct))
+      },
+      {
         id: "bh_pct",
         header: "B&H %",
-        cell: ({ row }) => <span className={numClass(row.original.buy_hold_pct)}>{fmtPct(row.original.buy_hold_pct)}</span>
+        cell: ({ row }) =>
+          row.original.buy_hold_pct == null ? "-" : <span className={numClass(row.original.buy_hold_pct)}>{fmtPct(row.original.buy_hold_pct)}</span>
       },
       {
         id: "bh_usd",
         header: "B&H $",
-        cell: ({ row }) => <span className={numClass(row.original.buy_hold_usd)}>{fmtMoney(row.original.buy_hold_usd)}</span>
+        cell: ({ row }) =>
+          row.original.buy_hold_usd == null ? "-" : <span className={numClass(row.original.buy_hold_usd)}>{fmtMoney(row.original.buy_hold_usd)}</span>
       }
     ],
     []
@@ -258,7 +273,7 @@ export default function DashboardPage() {
         <CardHeader>
           <CardTitle>Open Positions</CardTitle>
           <CardDescription>
-            Note: current price / P&amp;L will populate once Alpaca sync is implemented.
+            Current price and unrealized P&amp;L are pulled from Alpaca (when credentials are configured).
           </CardDescription>
         </CardHeader>
         <CardContent>

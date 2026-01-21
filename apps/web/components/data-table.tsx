@@ -21,7 +21,7 @@ export function DataTable<TData>({
   columns,
   data,
   searchPlaceholder = "Search…",
-  pageSize = 25
+  pageSize = 200
 }: {
   columns: ColumnDef<TData, any>[];
   data: TData[];
@@ -53,7 +53,11 @@ export function DataTable<TData>({
       <div className="flex items-center gap-3">
         <Input
           value={globalFilter ?? ""}
-          onChange={(e) => setGlobalFilter(e.target.value)}
+          onChange={(e) => {
+            setGlobalFilter(e.target.value);
+            // When filtering, jump back to the first page so Next/Prev stays consistent.
+            setPagination((p) => ({ ...p, pageIndex: 0 }));
+          }}
           placeholder={searchPlaceholder}
         />
         <Button
@@ -100,7 +104,7 @@ export function DataTable<TData>({
               <TableRow key={row.id}>
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>
-                    <div className="max-w-[360px] truncate" title={String(cell.getValue() ?? "")}>
+                    <div className="whitespace-normal break-words" title={String(cell.getValue() ?? "")}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </div>
                   </TableCell>
