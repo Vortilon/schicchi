@@ -78,6 +78,7 @@ def list_trades(
         t["order"] = {
             "id": o.id,
             "status": o.status,
+            "error": o.error_message,
             "alpaca_order_id": o.alpaca_order_id,
             "submitted_at": _to_iso(o.submitted_at),
             "filled_at": _to_iso(o.filled_at),

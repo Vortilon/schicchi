@@ -11,7 +11,7 @@ import {
   useReactTable
 } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,9 +45,6 @@ export function DataTable<TData>({
     getPaginationRowModel: getPaginationRowModel()
   });
 
-  const headerGroups = useMemo(() => table.getHeaderGroups(), [table]);
-  const rows = useMemo(() => table.getRowModel().rows, [table]);
-
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
@@ -74,7 +71,7 @@ export function DataTable<TData>({
 
       <Table>
         <TableHeader>
-          {headerGroups.map((hg) => (
+          {table.getHeaderGroups().map((hg) => (
             <TableRow key={hg.id}>
               {hg.headers.map((header) => {
                 const canSort = header.column.getCanSort();
@@ -99,8 +96,8 @@ export function DataTable<TData>({
           ))}
         </TableHeader>
         <TableBody>
-          {rows.length ? (
-            rows.map((row) => (
+          {table.getRowModel().rows.length ? (
+            table.getRowModel().rows.map((row) => (
               <TableRow key={row.id}>
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>

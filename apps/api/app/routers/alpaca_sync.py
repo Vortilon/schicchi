@@ -26,11 +26,22 @@ def _client() -> TradingClient:
 def alpaca_account() -> dict[str, Any]:
     c = _client()
     acct = c.get_account()
+    last_equity = getattr(acct, "last_equity", None)
+    try:
+        last_equity_f = float(last_equity) if last_equity is not None else None
+    except Exception:
+        last_equity_f = None
+    equity_f = float(acct.equity)
+    day_pl_usd = (equity_f - last_equity_f) if last_equity_f else None
+    day_pl_pct = (day_pl_usd / last_equity_f) if (day_pl_usd is not None and last_equity_f) else None
     return {
         "account_number": getattr(acct, "account_number", None),
         "id": str(getattr(acct, "id", "")) or None,
         "cash": float(acct.cash),
         "equity": float(acct.equity),
+        "last_equity": last_equity_f,
+        "day_pl_usd": day_pl_usd,
+        "day_pl_pct": day_pl_pct,
         "buying_power": float(acct.buying_power),
         "portfolio_value": float(acct.portfolio_value),
     }
