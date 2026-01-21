@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { fmtMoney, fmtPct, numClass } from "@/lib/format";
+import { fmtMoney, fmtNum, fmtPct, fmtTimeEST, numClass } from "@/lib/format";
 
 type PositionRow = {
   id: number;
@@ -28,6 +28,9 @@ type PositionRow = {
 type Account = {
   cash: number;
   equity: number;
+  last_equity?: number | null;
+  day_pl_usd?: number | null;
+  day_pl_pct?: number | null;
   buying_power: number;
   portfolio_value: number;
 };
@@ -53,7 +56,7 @@ export default function DashboardPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Array<{ id: string; kind: "info" | "success" | "error"; text: string; tsIso: string }>>([]);
   const [latestTradeId, setLatestTradeId] = useState<string | null>(null);
 
   async function loadAll() {
@@ -72,11 +75,52 @@ export default function DashboardPage() {
     setPositions(Array.isArray(posJson) ? posJson : []);
     setStrategies(Array.isArray(stratJson) ? stratJson : []);
     setTx(Array.isArray(txJson) ? txJson : []);
-    const newest = Array.isArray(txJson) && txJson.length ? txJson[0]?.trade_id : null;
+    const newestRow = Array.isArray(txJson) && txJson.length ? txJson[0] : null;
+    const newest = newestRow?.trade_id ?? null;
     if (newest && newest !== latestTradeId) {
       setLatestTradeId(newest);
-      setToast(`New activity: ${txJson[0]?.symbol} ${txJson[0]?.event} (${txJson[0]?.alpaca_status ?? "no alpaca"})`);
-      setTimeout(() => setToast(null), 5000);
+
+      const tsIso = newestRow?.signal_time ?? new Date().toISOString();
+      const base = `${newestRow?.strategy_name ?? "Strategy"}: ${newestRow?.symbol ?? ""} ${newestRow?.event ?? ""} ${newestRow?.side ?? ""}`.trim();
+
+      // 1) TradingView incoming signal (info)
+      const tvMsg = {
+        id: `${newest}-tv`,
+        kind: "info" as const,
+        tsIso,
+        text: `TradingView: ${base}`
+      };
+
+      // 2) Alpaca result (success/error)
+      const alpacaErr = newestRow?.alpaca_error;
+      const alpacaStatus = newestRow?.alpaca_status;
+      const alpacaMsg =
+        alpacaErr != null
+          ? {
+              id: `${newest}-alpaca-err`,
+              kind: "error" as const,
+              tsIso,
+              text: `Alpaca error: ${newestRow?.symbol ?? ""} ${newestRow?.event ?? ""} — ${alpacaErr}`
+            }
+          : alpacaStatus
+            ? {
+                id: `${newest}-alpaca-ok`,
+                kind: "success" as const,
+                tsIso,
+                text: `Alpaca: ${newestRow?.symbol ?? ""} ${newestRow?.event ?? ""} — ${alpacaStatus}`
+              }
+            : null;
+
+      setToasts((prev) => {
+        const next = [tvMsg, ...(alpacaMsg ? [alpacaMsg] : []), ...prev].slice(0, 6);
+        return next;
+      });
+
+      // auto-expire after 3 seconds
+      const expireIds = [tvMsg.id, alpacaMsg?.id].filter(Boolean) as string[];
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => !expireIds.includes(t.id)));
+      }, 3000);
     }
     setAccount(acctJson?.cash != null ? acctJson : null);
   }
@@ -106,17 +150,48 @@ export default function DashboardPage() {
 
   const columns = useMemo<ColumnDef<PositionRow>[]>(
     () => [
-      { accessorKey: "strategy_name", header: "Strategy" },
       { accessorKey: "symbol", header: "Symbol" },
       { accessorKey: "side", header: "Side" },
-      { accessorKey: "qty", header: "Qty" },
-      { accessorKey: "avg_entry_price", header: "Avg Entry" },
-      { accessorKey: "current_price", header: "Current Price" },
-      { accessorKey: "unrealized_pl_usd", header: "Unrealized P&L $" },
-      { accessorKey: "unrealized_pl_pct", header: "Unrealized P&L %" },
-      { accessorKey: "realized_pl_usd", header: "Realized P&L $" },
-      { accessorKey: "open_time", header: "Entry Time" },
-      { accessorKey: "last_sync_time", header: "Last Sync" },
+      {
+        accessorKey: "qty",
+        header: "Qty",
+        cell: ({ row }) => <span className="text-slate-900">{fmtNum(row.original.qty, 2)}</span>
+      },
+      {
+        accessorKey: "avg_entry_price",
+        header: "Avg Entry",
+        cell: ({ row }) => <span className="text-slate-900">{fmtNum(row.original.avg_entry_price, 2)}</span>
+      },
+      {
+        accessorKey: "current_price",
+        header: "Current Price",
+        cell: ({ row }) => <span className="text-slate-900">{row.original.current_price == null ? "-" : fmtNum(row.original.current_price, 2)}</span>
+      },
+      {
+        accessorKey: "unrealized_pl_usd",
+        header: "Unrealized P&L $",
+        cell: ({ row }) => <span className={numClass(row.original.unrealized_pl_usd)}>{fmtMoney(row.original.unrealized_pl_usd)}</span>
+      },
+      {
+        accessorKey: "unrealized_pl_pct",
+        header: "Unrealized P&L %",
+        cell: ({ row }) => <span className={numClass(row.original.unrealized_pl_pct)}>{fmtPct(row.original.unrealized_pl_pct)}</span>
+      },
+      {
+        accessorKey: "realized_pl_usd",
+        header: "Realized P&L $",
+        cell: ({ row }) => <span className={numClass(row.original.realized_pl_usd)}>{fmtMoney(row.original.realized_pl_usd)}</span>
+      },
+      {
+        accessorKey: "open_time",
+        header: "Entry Time",
+        cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.open_time)}</span>
+      },
+      {
+        accessorKey: "last_sync_time",
+        header: "Last Sync",
+        cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.last_sync_time)}</span>
+      },
       { accessorKey: "status", header: "Status" }
     ],
     []
@@ -124,7 +199,11 @@ export default function DashboardPage() {
 
   const txColumns = useMemo<ColumnDef<TxRow>[]>(
     () => [
-      { accessorKey: "signal_time", header: "Time" },
+      {
+        accessorKey: "signal_time",
+        header: "Time (EST)",
+        cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.signal_time)}</span>
+      },
       { accessorKey: "strategy_name", header: "Strategy" },
       { accessorKey: "symbol", header: "Symbol" },
       { accessorKey: "event", header: "Event" },
@@ -140,7 +219,11 @@ export default function DashboardPage() {
           return "-";
         }
       },
-      { accessorKey: "alpaca_error", header: "Error" }
+      {
+        accessorKey: "alpaca_error",
+        header: "Error",
+        cell: ({ row }) => (row.original.alpaca_error ? <span className="text-red-600">{row.original.alpaca_error}</span> : "-")
+      }
     ],
     []
   );
@@ -201,17 +284,35 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {toast ? (
-        <div className="fixed right-6 top-20 z-50 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-lg">
-          {toast}
+      {toasts.length ? (
+        <div className="fixed right-6 top-20 z-50 space-y-2">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm shadow-lg"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-xs text-slate-500">{fmtTimeEST(t.tsIso)}</div>
+                <div
+                  className={
+                    t.kind === "success"
+                      ? "text-emerald-700"
+                      : t.kind === "error"
+                        ? "text-red-600"
+                        : "text-blue-700"
+                  }
+                >
+                  {t.kind === "success" ? "Success" : t.kind === "error" ? "Error" : "Info"}
+                </div>
+              </div>
+              <div className="mt-1 text-slate-900">{t.text}</div>
+            </div>
+          ))}
         </div>
       ) : null}
       <div className="flex items-start justify-between gap-4">
         <div>
         <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Today’s overview: account balance, open positions, strategies performance summary, and last activity.
-          </p>
         </div>
         <Button
           variant="outline"
@@ -230,14 +331,14 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-6">
         <Card>
           <CardHeader>
             <CardTitle>Cash</CardTitle>
             <CardDescription>Alpaca account</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-semibold">{account ? `$${account.cash.toFixed(2)}` : "-"}</div>
+            <div className="text-xl font-semibold">{account ? fmtMoney(account.cash) : "-"}</div>
           </CardContent>
         </Card>
         <Card>
@@ -246,7 +347,29 @@ export default function DashboardPage() {
             <CardDescription>Alpaca account</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-semibold">{account ? `$${account.equity.toFixed(2)}` : "-"}</div>
+            <div className="text-xl font-semibold">{account ? fmtMoney(account.equity) : "-"}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Day P&amp;L</CardTitle>
+            <CardDescription>Alpaca account</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-xl font-semibold ${numClass(account?.day_pl_usd ?? null)}`}>
+              {account?.day_pl_usd == null ? "-" : fmtMoney(account.day_pl_usd)}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Day P&amp;L %</CardTitle>
+            <CardDescription>Alpaca account</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-xl font-semibold ${numClass(account?.day_pl_pct ?? null)}`}>
+              {account?.day_pl_pct == null ? "-" : fmtPct(account.day_pl_pct)}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -255,7 +378,7 @@ export default function DashboardPage() {
             <CardDescription>Alpaca account</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-semibold">{account ? `$${account.buying_power.toFixed(2)}` : "-"}</div>
+            <div className="text-xl font-semibold">{account ? fmtMoney(account.buying_power) : "-"}</div>
           </CardContent>
         </Card>
         <Card>
@@ -272,15 +395,12 @@ export default function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Open Positions</CardTitle>
-          <CardDescription>
-            Current price and unrealized P&amp;L are pulled from Alpaca (when credentials are configured).
-          </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="text-sm text-slate-600">Loading…</div>
           ) : (
-            <DataTable data={positions} columns={columns} pageSize={25} searchPlaceholder="Search positions…" />
+            <DataTable data={positions} columns={columns} pageSize={200} searchPlaceholder="Search positions…" />
           )}
         </CardContent>
       </Card>
@@ -288,10 +408,9 @@ export default function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Strategies Overview</CardTitle>
-          <CardDescription>Active strategies and their current counts (P&amp;L will refine as fills sync matures).</CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? <div className="text-sm text-slate-600">Loading…</div> : <DataTable data={strategies} columns={stratColumns} pageSize={25} searchPlaceholder="Search strategies…" />}
+          {loading ? <div className="text-sm text-slate-600">Loading…</div> : <DataTable data={strategies} columns={stratColumns} pageSize={200} searchPlaceholder="Search strategies…" />}
         </CardContent>
       </Card>
 
@@ -306,7 +425,7 @@ export default function DashboardPage() {
           {loading ? (
             <div className="text-sm text-slate-600">Loading…</div>
           ) : (
-            <DataTable data={tx} columns={txColumns} pageSize={25} searchPlaceholder="Search activity…" />
+            <DataTable data={tx} columns={txColumns} pageSize={200} searchPlaceholder="Search activity…" />
           )}
         </CardContent>
       </Card>

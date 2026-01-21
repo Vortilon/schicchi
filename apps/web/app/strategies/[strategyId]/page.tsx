@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { fmtMoney, fmtPct, numClass } from "@/lib/format";
+import { fmtMoney, fmtNum, fmtPct, fmtTimeEST, numClass } from "@/lib/format";
 
 type TradeRow = {
   trade_id: string;
@@ -26,6 +26,7 @@ type TradeRow = {
     filled_at: string | null;
     filled_avg_price: number | null;
     filled_qty: number | null;
+    error?: string | null;
   } | null;
 };
 
@@ -39,22 +40,42 @@ type StrategyReport = {
     basis_per_symbol_usd: number;
   };
   summary: {
+    initial_capital_usd: number;
+    initial_capital_source: string;
+    open_pnl_usd: number | null;
+    open_pnl_pct: number | null;
+    net_pnl_usd: number;
+    net_pnl_pct: number | null;
+    gross_profit_usd: number;
+    gross_profit_pct: number | null;
+    gross_loss_usd: number;
+    gross_loss_pct: number | null;
+    profit_factor: number | null;
+    commission_paid_usd: number;
+    expected_payoff_usd: number | null;
+    buy_hold_return_usd: number | null;
+    buy_hold_return_pct: number | null;
+    strategy_outperformance_usd: number | null;
     symbols_traded: number;
     signals_total: number;
-    open_positions_count: number;
-    trades_total: number;
-    wins: number;
-    losses: number;
-    win_rate: number | null;
-    pnl_usd: number;
-    pnl_pct: number | null;
-    gross_profit_usd: number;
-    gross_loss_usd: number;
-    profit_factor: number | null;
+    total_trades: number;
+    total_open_trades: number;
+    winning_trades: number;
+    losing_trades: number;
+    percent_profitable: number | null;
+    avg_pnl_usd: number | null;
+    avg_winning_trade_usd: number | null;
+    avg_losing_trade_usd: number | null;
+    ratio_avg_win_avg_loss: number | null;
+    largest_winning_trade_usd: number | null;
+    largest_losing_trade_usd: number | null;
+    largest_winning_trade_pct: number | null;
+    largest_losing_trade_pct: number | null;
+    largest_winner_pct_gross_profit: number | null;
+    largest_loser_pct_gross_loss: number | null;
     max_drawdown_pct: number | null;
-    buy_hold_basis_usd: number | null;
-    buy_hold_usd: number | null;
-    buy_hold_pct: number | null;
+    sharpe_ratio: number | null;
+    sortino_ratio: number | null;
   };
   by_symbol: Array<{
     symbol: string;
@@ -71,6 +92,20 @@ type StrategyReport = {
     buy_hold_pct: number | null;
     buy_hold_usd: number | null;
   }>;
+  trades?: Array<{
+    trade_no: number;
+    symbol: string;
+    direction: "long" | "short";
+    entry_time: string | null;
+    exit_time: string | null;
+    entry_avg_price: number;
+    exit_price: number;
+    position_size_usd: number | null;
+    net_pnl_usd: number;
+    net_pnl_pct: number | null;
+    cumulative_pnl_usd: number;
+  }>;
+  formulas?: Record<string, string>;
   notes?: string[];
 };
 
@@ -110,7 +145,11 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
       { accessorKey: "symbol", header: "Symbol" },
       { accessorKey: "event", header: "Event" },
       { accessorKey: "side", header: "Side" },
-      { accessorKey: "signal_time", header: "Signal Time" },
+      {
+        accessorKey: "signal_time",
+        header: "Signal Time (EST)",
+        cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.signal_time)}</span>
+      },
       { accessorKey: "signal_price", header: "Signal Price" },
       {
         id: "qty_or_notional",
@@ -118,8 +157,8 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
         cell: ({ row }) => {
           const o = row.original.order;
           if (!o) return "-";
-          if (o.qty != null) return `qty ${o.qty}`;
-          if (o.notional != null) return `$${o.notional}`;
+          if (o.qty != null) return `qty ${fmtNum(o.qty, 2)}`;
+          if (o.notional != null) return fmtMoney(o.notional);
           return "-";
         }
       },
@@ -137,6 +176,50 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
           if (o.filled_qty != null && o.filled_avg_price != null) return `${o.filled_qty} @ ${o.filled_avg_price}`;
           return "-";
         }
+      },
+      {
+        id: "error",
+        header: "Error",
+        cell: ({ row }) => (row.original.order?.error ? <span className="text-red-600">{row.original.order?.error}</span> : "-")
+      }
+    ],
+    []
+  );
+
+  const tradeListColumns = useMemo<ColumnDef<NonNullable<StrategyReport["trades"]>[number]>[]>(
+    () => [
+      { accessorKey: "trade_no", header: "Trade #" },
+      { accessorKey: "symbol", header: "Symbol" },
+      { accessorKey: "direction", header: "Type" },
+      {
+        accessorKey: "entry_time",
+        header: "Entry (EST)",
+        cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.entry_time)}</span>
+      },
+      {
+        accessorKey: "exit_time",
+        header: "Exit (EST)",
+        cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.exit_time)}</span>
+      },
+      {
+        accessorKey: "position_size_usd",
+        header: "Position size",
+        cell: ({ row }) => (row.original.position_size_usd == null ? "-" : fmtMoney(row.original.position_size_usd))
+      },
+      {
+        accessorKey: "net_pnl_usd",
+        header: "Net P&L",
+        cell: ({ row }) => <span className={numClass(row.original.net_pnl_usd)}>{fmtMoney(row.original.net_pnl_usd)}</span>
+      },
+      {
+        accessorKey: "net_pnl_pct",
+        header: "Net P&L %",
+        cell: ({ row }) => (row.original.net_pnl_pct == null ? "-" : <span className={numClass(row.original.net_pnl_pct)}>{fmtPct(row.original.net_pnl_pct)}</span>)
+      },
+      {
+        accessorKey: "cumulative_pnl_usd",
+        header: "Cumulative P&L",
+        cell: ({ row }) => <span className={numClass(row.original.cumulative_pnl_usd)}>{fmtMoney(row.original.cumulative_pnl_usd)}</span>
       }
     ],
     []
@@ -150,7 +233,7 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
       {
         accessorKey: "open_qty",
         header: "Open Qty",
-        cell: ({ row }) => (row.original.open_qty === 0 ? "-" : row.original.open_qty)
+        cell: ({ row }) => (row.original.open_qty === 0 ? "-" : fmtNum(row.original.open_qty, 2))
       },
       {
         accessorKey: "net_profit_usd",
@@ -195,9 +278,9 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
 
       <Card>
         <CardHeader>
-          <CardTitle>Summary (numbers-only)</CardTitle>
+          <CardTitle>Summary (strategy-scoped)</CardTitle>
           <CardDescription>
-            Computed per symbol first, then rolled up. Trades are counted when a symbol position returns to flat.
+            P&amp;L and positions are computed from this strategy’s filled orders (not the net Alpaca account position).
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -208,20 +291,28 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
           ) : report ? (
             <div className="grid gap-4 md:grid-cols-6">
               <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="text-xs text-slate-500">Symbols</div>
-                <div className="text-xl font-semibold text-slate-900">{report.summary.symbols_traded}</div>
+                <div className="text-xs text-slate-500">Initial capital</div>
+                <div className="text-xl font-semibold text-slate-900">{fmtMoney(report.summary.initial_capital_usd)}</div>
+                <div className="mt-1 text-xs text-slate-500">{report.summary.initial_capital_source}</div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="text-xs text-slate-500">Trades</div>
-                <div className="text-xl font-semibold text-slate-900">{report.summary.trades_total}</div>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="text-xs text-slate-500">Win rate</div>
-                <div className="text-xl font-semibold text-slate-900">{report.summary.win_rate == null ? "-" : fmtPct(report.summary.win_rate)}</div>
+                <div className="text-xs text-slate-500">Open P&amp;L</div>
+                <div className={`text-xl font-semibold ${numClass(report.summary.open_pnl_usd ?? null)}`}>
+                  {report.summary.open_pnl_usd == null ? "-" : fmtMoney(report.summary.open_pnl_usd)}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {report.summary.open_pnl_pct == null ? "" : fmtPct(report.summary.open_pnl_pct)}
+                </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-4">
                 <div className="text-xs text-slate-500">Net P&amp;L</div>
-                <div className={`text-xl font-semibold ${numClass(report.summary.pnl_usd)}`}>{fmtMoney(report.summary.pnl_usd)}</div>
+                <div className={`text-xl font-semibold ${numClass(report.summary.net_pnl_usd)}`}>{fmtMoney(report.summary.net_pnl_usd)}</div>
+                <div className="mt-1 text-xs text-slate-500">{report.summary.net_pnl_pct == null ? "" : fmtPct(report.summary.net_pnl_pct)}</div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="text-xs text-slate-500">Gross profit</div>
+                <div className={`text-xl font-semibold ${numClass(report.summary.gross_profit_usd)}`}>{fmtMoney(report.summary.gross_profit_usd)}</div>
+                <div className="mt-1 text-xs text-slate-500">{report.summary.gross_profit_pct == null ? "" : fmtPct(report.summary.gross_profit_pct)}</div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-4">
                 <div className="text-xs text-slate-500">Profit factor</div>
@@ -234,10 +325,10 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
                 </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-4 md:col-span-3">
-                <div className="text-xs text-slate-500">Buy &amp; Hold (same period)</div>
+                <div className="text-xs text-slate-500">Buy &amp; Hold return (same period)</div>
                 <div className="mt-1 text-sm text-slate-900">
-                  {report.summary.buy_hold_pct == null ? "-" : fmtPct(report.summary.buy_hold_pct)}{" "}
-                  {report.summary.buy_hold_usd == null ? "" : `(${fmtMoney(report.summary.buy_hold_usd)})`}
+                  {report.summary.buy_hold_return_pct == null ? "-" : fmtPct(report.summary.buy_hold_return_pct)}{" "}
+                  {report.summary.buy_hold_return_usd == null ? "" : `(${fmtMoney(report.summary.buy_hold_return_usd)})`}
                 </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-4 md:col-span-3">
@@ -255,6 +346,24 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
 
       <Card>
         <CardHeader>
+          <CardTitle>Trades (round-trips)</CardTitle>
+          <CardDescription>
+            TradingView-like trade list: each row is an entry→exit round-trip for a symbol (strategy-scoped).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="text-sm text-slate-600">Loading…</div>
+          ) : report?.trades?.length ? (
+            <DataTable data={report.trades} columns={tradeListColumns} pageSize={200} searchPlaceholder="Search trade list…" />
+          ) : (
+            <div className="text-sm text-slate-600">No closed trades yet.</div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Per-symbol breakdown</CardTitle>
           <CardDescription>
             This is the “fix” for mixed-symbol math: each symbol is computed independently, then totals are rolled up.
@@ -264,7 +373,7 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
           {loading ? (
             <div className="text-sm text-slate-600">Loading…</div>
           ) : report?.by_symbol?.length ? (
-            <DataTable data={report.by_symbol} columns={bySymbolColumns} pageSize={25} searchPlaceholder="Search symbols…" />
+            <DataTable data={report.by_symbol} columns={bySymbolColumns} pageSize={200} searchPlaceholder="Search symbols…" />
           ) : (
             <div className="text-sm text-slate-600">No symbol rows yet.</div>
           )}
@@ -282,7 +391,7 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
           {loading ? (
             <div className="text-sm text-slate-600">Loading…</div>
           ) : (
-            <DataTable data={trades} columns={columns} searchPlaceholder="Search trades…" />
+            <DataTable data={trades} columns={columns} pageSize={200} searchPlaceholder="Search trades…" />
           )}
         </CardContent>
       </Card>

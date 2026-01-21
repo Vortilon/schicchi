@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from sqlmodel import Session, select
 
+from ..alpaca import trading_client
 from ..db import engine
 from ..models import Order, Position, Signal, Strategy
 
@@ -268,6 +269,146 @@ def _compute_realized_performance(*, orders: list[Order]) -> dict[str, Any]:
     }
 
 
+def _build_roundtrip_trades(*, orders: list[Order]) -> list[dict[str, Any]]:
+    """
+    Build a TradingView-like trade list (round-trips) from filled orders.
+
+    A trade is closed when a symbol position returns to flat. If a position flips,
+    we close the current trade and open a new one at the flip timestamp.
+    """
+    filled = [
+        o
+        for o in orders
+        if o.filled_qty is not None and o.filled_avg_price is not None and float(o.filled_qty) != 0.0
+    ]
+    filled.sort(key=_order_ts)
+
+    state: dict[str, dict[str, Any]] = {}
+    out: list[dict[str, Any]] = []
+    trade_no = 0
+    cumulative = 0.0
+
+    def ensure(sym: str) -> dict[str, Any]:
+        if sym not in state:
+            state[sym] = {
+                "qty": 0.0,  # signed
+                "avg": 0.0,
+                "entry_time": None,  # datetime | None
+                "basis_usd": 0.0,  # sum of entry legs (abs(qty)*price) while trade open
+                "realized_usd": 0.0,
+            }
+        return state[sym]
+
+    for o in filled:
+        sym = o.symbol
+        side = (o.side or "").upper()
+        qty = float(o.filled_qty)  # type: ignore[arg-type]
+        price = float(o.filled_avg_price)  # type: ignore[arg-type]
+        t = _order_ts(o)
+        if side not in ("BUY", "SELL"):
+            continue
+        delta = qty if side == "BUY" else -qty
+
+        st = ensure(sym)
+        pos_qty = float(st["qty"])
+        pos_avg = float(st["avg"])
+
+        # Open from flat
+        if pos_qty == 0.0:
+            st["qty"] = delta
+            st["avg"] = price
+            st["entry_time"] = t
+            st["basis_usd"] = abs(delta) * price
+            st["realized_usd"] = 0.0
+            continue
+
+        # Add to same direction (increase basis)
+        if (pos_qty > 0 and delta > 0) or (pos_qty < 0 and delta < 0):
+            new_abs = abs(pos_qty) + abs(delta)
+            if new_abs > 0:
+                st["avg"] = ((abs(pos_qty) * pos_avg) + (abs(delta) * price)) / new_abs
+            st["qty"] = pos_qty + delta
+            st["basis_usd"] = float(st["basis_usd"]) + (abs(delta) * price)
+            continue
+
+        # Reduce or flip => realize P&L on the closed portion
+        closing_qty = min(abs(pos_qty), abs(delta))
+        realized = 0.0
+        if pos_qty > 0 and delta < 0:
+            realized = closing_qty * (price - pos_avg)
+        elif pos_qty < 0 and delta > 0:
+            realized = closing_qty * (pos_avg - price)
+        st["realized_usd"] = float(st["realized_usd"]) + realized
+
+        new_qty = pos_qty + delta
+
+        # Flip: close trade then open opposite
+        flipped = (pos_qty > 0 and new_qty < 0) or (pos_qty < 0 and new_qty > 0)
+        if flipped:
+            trade_no += 1
+            pnl = float(st["realized_usd"])
+            cumulative += pnl
+            basis = float(st["basis_usd"]) or None
+            pnl_pct = (pnl / basis) if basis else None
+            out.append(
+                {
+                    "trade_no": trade_no,
+                    "symbol": sym,
+                    "direction": "long" if pos_qty > 0 else "short",
+                    "entry_time": st["entry_time"].isoformat() if st["entry_time"] else None,
+                    "exit_time": t.isoformat(),
+                    "entry_avg_price": pos_avg,
+                    "exit_price": price,
+                    "position_size_usd": basis,
+                    "net_pnl_usd": pnl,
+                    "net_pnl_pct": pnl_pct,
+                    "cumulative_pnl_usd": cumulative,
+                }
+            )
+            # Open new opposite trade at flip timestamp
+            st["qty"] = new_qty
+            st["avg"] = price
+            st["entry_time"] = t
+            st["basis_usd"] = abs(new_qty) * price
+            st["realized_usd"] = 0.0
+            continue
+
+        # Close to flat => finalize trade
+        if new_qty == 0.0:
+            trade_no += 1
+            pnl = float(st["realized_usd"])
+            cumulative += pnl
+            basis = float(st["basis_usd"]) or None
+            pnl_pct = (pnl / basis) if basis else None
+            out.append(
+                {
+                    "trade_no": trade_no,
+                    "symbol": sym,
+                    "direction": "long" if pos_qty > 0 else "short",
+                    "entry_time": st["entry_time"].isoformat() if st["entry_time"] else None,
+                    "exit_time": t.isoformat(),
+                    "entry_avg_price": pos_avg,
+                    "exit_price": price,
+                    "position_size_usd": basis,
+                    "net_pnl_usd": pnl,
+                    "net_pnl_pct": pnl_pct,
+                    "cumulative_pnl_usd": cumulative,
+                }
+            )
+            st["qty"] = 0.0
+            st["avg"] = 0.0
+            st["entry_time"] = None
+            st["basis_usd"] = 0.0
+            st["realized_usd"] = 0.0
+            continue
+
+        # Partial reduce remaining open
+        st["qty"] = new_qty
+        # avg unchanged for remaining qty
+
+    return out
+
+
 @router.get("/strategies")
 def list_strategies(active_only: bool = Query(default=False)) -> list[dict[str, Any]]:
     with Session(engine) as s:
@@ -343,7 +484,10 @@ def list_strategies(active_only: bool = Query(default=False)) -> list[dict[str, 
 
 
 @router.get("/strategies/{strategy_id}/report")
-def strategy_report(strategy_id: str) -> dict[str, Any]:
+def strategy_report(
+    strategy_id: str,
+    initial_capital_usd: float | None = Query(default=None, gt=0),
+) -> dict[str, Any]:
     """
     Strategy report with per-symbol breakdown (TradingView-like numbers, no charts).
     """
@@ -357,6 +501,34 @@ def strategy_report(strategy_id: str) -> dict[str, Any]:
     sigs_sorted = sorted(sigs, key=lambda x: x.signal_time)
     bh = _compute_bh_from_signals(strat=strat, sigs=sigs_sorted)
     perf = _compute_realized_performance(orders=ords)
+    trades = _build_roundtrip_trades(orders=ords)
+
+    # Determine an "initial capital" comparable number.
+    # For forward testing, a good default is Alpaca last_equity (start-of-day equity) if available.
+    acct_last_equity = None
+    try:
+        acct = trading_client().get_account()
+        v = getattr(acct, "last_equity", None)
+        acct_last_equity = float(v) if v is not None else None
+    except Exception:
+        acct_last_equity = None
+
+    basis_total = float(bh["buy_hold_basis_usd"] or 0.0)
+    init_cap = float(initial_capital_usd or acct_last_equity or (basis_total or 100000.0))
+    init_cap_source = "query" if initial_capital_usd else ("alpaca_last_equity" if acct_last_equity else ("basis_total" if basis_total else "default_100000"))
+
+    # Buy & hold return on initial capital (TV-style)
+    bh_pct_total = bh.get("buy_hold_pct")
+    bh_return_usd = (init_cap * float(bh_pct_total)) if bh_pct_total is not None else None
+
+    pnl_usd = float(perf["pnl_usd"])
+    pnl_pct = (pnl_usd / init_cap) if init_cap else None
+
+    gross_profit = float(perf["gross_profit_usd"])
+    gross_loss = float(perf["gross_loss_usd"])
+
+    # Strategy outperformance vs buy&hold on the same initial capital.
+    outperf_usd = (pnl_usd - bh_return_usd) if bh_return_usd is not None else None
 
     # Merge BH + performance per symbol
     bh_by_symbol = {x["symbol"]: x for x in (bh.get("buy_hold_by_symbol") or [])}
@@ -394,9 +566,40 @@ def strategy_report(strategy_id: str) -> dict[str, Any]:
             row.update({"buy_hold_basis_usd": None, "buy_hold_pct": None, "buy_hold_usd": None})
         by_symbol.append(row)
 
-    basis_total = float(bh["buy_hold_basis_usd"] or 0.0)
-    pnl_usd = float(perf["pnl_usd"])
-    pnl_pct = (pnl_usd / basis_total) if basis_total else None
+    # Open P&L (best-effort): mark strategy open qty/avg to market using latest Alpaca price if available,
+    # else fall back to last signal price for that symbol.
+    last_signal_price: dict[str, float] = {}
+    for s in sigs_sorted:
+        if s.signal_price is not None:
+            last_signal_price[s.symbol] = float(s.signal_price)
+    latest_price: dict[str, float] = {}
+    try:
+        for p in trading_client().get_all_positions():
+            sym = getattr(p, "symbol", None)
+            cp = getattr(p, "current_price", None)
+            if sym and cp is not None:
+                latest_price[str(sym)] = float(cp)
+    except Exception:
+        latest_price = {}
+
+    open_pnl_usd = 0.0
+    open_basis_usd = 0.0
+    open_trades = 0
+    for sym, st in {x["symbol"]: x for x in (perf.get("by_symbol") or [])}.items():
+        q = float(st.get("open_qty") or 0.0)
+        avg = st.get("avg_entry_price")
+        if q == 0.0 or avg is None:
+            continue
+        px = latest_price.get(sym) or last_signal_price.get(sym)
+        if px is None:
+            continue
+        open_trades += 1
+        open_basis_usd += abs(q) * float(avg)
+        if q > 0:
+            open_pnl_usd += abs(q) * (float(px) - float(avg))
+        else:
+            open_pnl_usd += abs(q) * (float(avg) - float(px))
+    open_pnl_pct = (open_pnl_usd / open_basis_usd) if open_basis_usd else None
 
     return {
         "strategy": {
@@ -407,28 +610,70 @@ def strategy_report(strategy_id: str) -> dict[str, Any]:
             "basis_per_symbol_usd": _basis_per_symbol_usd(strat),
         },
         "summary": {
+            "initial_capital_usd": init_cap,
+            "initial_capital_source": init_cap_source,
+            "open_pnl_usd": open_pnl_usd if open_trades else None,
+            "open_pnl_pct": open_pnl_pct,
+            "net_pnl_usd": pnl_usd,
+            "net_pnl_pct": pnl_pct,
+            "gross_profit_usd": gross_profit,
+            "gross_profit_pct": (gross_profit / init_cap) if init_cap else None,
+            "gross_loss_usd": gross_loss,
+            "gross_loss_pct": (gross_loss / init_cap) if init_cap else None,
+            "profit_factor": perf["profit_factor"],
+            "commission_paid_usd": 0.0,
+            "expected_payoff_usd": perf["avg_trade_usd"],
+            "buy_hold_return_usd": bh_return_usd,
+            "buy_hold_return_pct": bh_pct_total,
+            "strategy_outperformance_usd": outperf_usd,
             "symbols_traded": len(symbols),
             "signals_total": len(sigs_sorted),
-            "open_positions_count": int(perf["open_positions_count"]),
-            "trades_total": int(perf["trades_total"]),
-            "wins": int(perf["wins"]),
-            "losses": int(perf["losses"]),
-            "win_rate": perf["win_rate"],
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
-            "gross_profit_usd": float(perf["gross_profit_usd"]),
-            "gross_loss_usd": float(perf["gross_loss_usd"]),
-            "profit_factor": perf["profit_factor"],
-            "avg_trade_usd": perf["avg_trade_usd"],
-            "largest_win_usd": perf["largest_win_usd"],
-            "largest_loss_usd": perf["largest_loss_usd"],
+            "total_trades": int(perf["trades_total"]),
+            "total_open_trades": int(perf["open_positions_count"]),
+            "winning_trades": int(perf["wins"]),
+            "losing_trades": int(perf["losses"]),
+            "percent_profitable": perf["win_rate"],
+            "avg_pnl_usd": perf["avg_trade_usd"],
+            "avg_winning_trade_usd": (
+                (gross_profit / float(perf["wins"])) if perf["wins"] else None
+            ),
+            "avg_losing_trade_usd": (
+                (abs(gross_loss) / float(perf["losses"])) if perf["losses"] else None
+            ),
+            "ratio_avg_win_avg_loss": (
+                ((gross_profit / float(perf["wins"])) / (abs(gross_loss) / float(perf["losses"])))
+                if (perf["wins"] and perf["losses"] and gross_loss)
+                else None
+            ),
+            "largest_winning_trade_usd": perf["largest_win_usd"],
+            "largest_losing_trade_usd": perf["largest_loss_usd"],
+            "largest_winning_trade_pct": (float(perf["largest_win_usd"]) / init_cap) if (perf["largest_win_usd"] is not None and init_cap) else None,
+            "largest_losing_trade_pct": (abs(float(perf["largest_loss_usd"])) / init_cap) if (perf["largest_loss_usd"] is not None and init_cap) else None,
+            "largest_winner_pct_gross_profit": (float(perf["largest_win_usd"]) / gross_profit) if (perf["largest_win_usd"] is not None and gross_profit) else None,
+            "largest_loser_pct_gross_loss": (abs(float(perf["largest_loss_usd"])) / abs(gross_loss)) if (perf["largest_loss_usd"] is not None and gross_loss) else None,
             "max_drawdown_pct": perf["max_drawdown_pct"],
-            "buy_hold_basis_usd": bh["buy_hold_basis_usd"],
-            "buy_hold_usd": bh["buy_hold_usd"],
-            "buy_hold_pct": bh["buy_hold_pct"],
+            "sharpe_ratio": None,
+            "sortino_ratio": None,
         },
         "by_symbol": by_symbol,
+        "trades": trades,
+        "formulas": {
+            "open_pnl_usd": "Σ over open symbols: long => qty*(px-avg), short => qty*(avg-px)",
+            "open_pnl_pct": "open_pnl_usd / Σ(|qty|*avg)",
+            "net_pnl_usd": "Σ realized P&L from filled orders when position reduces/closes",
+            "net_pnl_pct": "net_pnl_usd / initial_capital_usd",
+            "gross_profit_usd": "Σ(trade_pnl) where trade_pnl > 0",
+            "gross_loss_usd": "Σ(trade_pnl) where trade_pnl < 0",
+            "profit_factor": "gross_profit_usd / |gross_loss_usd|",
+            "expected_payoff_usd": "avg(trade_pnl_usd) across closed trades",
+            "percent_profitable": "winning_trades / total_trades",
+            "buy_hold_return_pct": "(last_price/first_price) - 1 (per symbol), then capital-weighted rollup",
+            "buy_hold_return_usd": "initial_capital_usd * buy_hold_return_pct",
+            "strategy_outperformance_usd": "net_pnl_usd - buy_hold_return_usd",
+        },
         "notes": [
+            "All strategy metrics are computed from THIS strategy_id’s filled orders (strategy-scoped).",
+            "Alpaca positions are account-level and may net multiple strategies together; we only use Alpaca for latest prices when possible.",
             "Trade stats are computed from filled orders: a trade is counted when a symbol position returns to flat.",
             bh["notes"],
         ],

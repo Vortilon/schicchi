@@ -90,17 +90,11 @@ export default function StrategiesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Strategies</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Active strategies, open position counts, and baseline buy-and-hold comparison.
-        </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Strategy Summary</CardTitle>
-          <CardDescription>
-            Buy &amp; Hold USD uses the same initial notional as the strategy’s sizing (default $1000) for a fair $ comparison.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
