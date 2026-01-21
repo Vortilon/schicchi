@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any
 
 from fastapi import APIRouter, Query
 from sqlmodel import Session, select
 
+from ..alpaca import format_alpaca_error_message
 from ..db import engine
 from ..models import Order, Signal, Strategy
 
@@ -38,7 +40,21 @@ def list_trades(
     # Pair by trade_id (as designed)
     by_trade: dict[str, dict[str, Any]] = {}
 
+    def _extract_order_fields_from_payload(payload_json: str) -> dict[str, Any]:
+        try:
+            p = json.loads(payload_json)
+            if isinstance(p, dict):
+                return {
+                    "order_type": p.get("order_type"),
+                    "limit_price": p.get("limit_price"),
+                    "time_in_force": p.get("time_in_force"),
+                }
+        except Exception:
+            pass
+        return {"order_type": None, "limit_price": None, "time_in_force": None}
+
     for sig in signals:
+        extra = _extract_order_fields_from_payload(sig.payload_json)
         t = by_trade.setdefault(
             sig.trade_id,
             {
@@ -50,6 +66,9 @@ def list_trades(
                 "event": sig.event,
                 "signal_time": _to_iso(sig.signal_time),
                 "signal_price": sig.signal_price,
+                "order_type": extra["order_type"],
+                "limit_price": extra["limit_price"],
+                "time_in_force": extra["time_in_force"],
                 "order": None,
             },
         )
@@ -59,6 +78,9 @@ def list_trades(
             t["signal_price"] = sig.signal_price
             t["side"] = sig.side
             t["event"] = sig.event
+            t["order_type"] = extra["order_type"]
+            t["limit_price"] = extra["limit_price"]
+            t["time_in_force"] = extra["time_in_force"]
 
     for o in orders:
         t = by_trade.setdefault(
@@ -72,13 +94,16 @@ def list_trades(
                 "event": None,
                 "signal_time": None,
                 "signal_price": None,
+                "order_type": None,
+                "limit_price": None,
+                "time_in_force": None,
                 "order": None,
             },
         )
         t["order"] = {
             "id": o.id,
             "status": o.status,
-            "error": o.error_message,
+            "error": format_alpaca_error_message(o.error_message, symbol=o.symbol, side=o.side),
             "alpaca_order_id": o.alpaca_order_id,
             "submitted_at": _to_iso(o.submitted_at),
             "filled_at": _to_iso(o.filled_at),

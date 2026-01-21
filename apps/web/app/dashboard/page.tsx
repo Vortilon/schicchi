@@ -43,16 +43,39 @@ type TxRow = {
   side: string;
   signal_time: string;
   signal_price: number | string | null;
+  order_type?: string | null;
+  limit_price?: number | string | null;
+  time_in_force?: string | null;
   alpaca_status: string | null;
   alpaca_error: string | null;
   filled_qty: number | null;
   filled_avg_price: number | null;
 };
 
+type AlpacaOrderRow = {
+  alpaca_order_id: string;
+  client_order_id: string | null;
+  strategy_name: string | null;
+  symbol: string | null;
+  side: string | null;
+  order_type: string | null;
+  time_in_force: string | null;
+  status: string | null;
+  qty: number | null;
+  notional: number | null;
+  limit_price: number | null;
+  stop_price: number | null;
+  filled_qty: number | null;
+  filled_avg_price: number | null;
+  submitted_at: string | null;
+  filled_at: string | null;
+};
+
 export default function DashboardPage() {
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [strategies, setStrategies] = useState<any[]>([]);
   const [tx, setTx] = useState<TxRow[]>([]);
+  const [orders, setOrders] = useState<AlpacaOrderRow[]>([]);
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -60,28 +83,32 @@ export default function DashboardPage() {
   const [latestTradeId, setLatestTradeId] = useState<string | null>(null);
 
   async function loadAll() {
-    const [posRes, stratRes, txRes, acctRes] = await Promise.all([
+    const [posRes, stratRes, txRes, ordersRes, acctRes] = await Promise.all([
       fetch("/api/positions", { cache: "no-store" }),
       fetch("/api/strategies?active_only=true", { cache: "no-store" }),
       fetch("/api/transactions?today_only=true&limit=200", { cache: "no-store" }),
+      fetch("/api/alpaca/orders?status=all&limit=200", { cache: "no-store" }),
       fetch("/api/alpaca/account", { cache: "no-store" })
     ]);
 
     const posJson = await posRes.json();
     const stratJson = await stratRes.json();
     const txJson = await txRes.json();
+    const ordersJson = await ordersRes.json();
     const acctJson = await acctRes.json();
 
     setPositions(Array.isArray(posJson) ? posJson : []);
     setStrategies(Array.isArray(stratJson) ? stratJson : []);
     setTx(Array.isArray(txJson) ? txJson : []);
+    setOrders(Array.isArray(ordersJson) ? ordersJson : []);
     const newestRow = Array.isArray(txJson) && txJson.length ? txJson[0] : null;
     const newest = newestRow?.trade_id ?? null;
     if (newest && newest !== latestTradeId) {
       setLatestTradeId(newest);
 
       const tsIso = newestRow?.signal_time ?? new Date().toISOString();
-      const base = `${newestRow?.strategy_name ?? "Strategy"}: ${newestRow?.symbol ?? ""} ${newestRow?.event ?? ""} ${newestRow?.side ?? ""}`.trim();
+      const ot = newestRow?.order_type ? ` ${String(newestRow.order_type).toUpperCase()}` : "";
+      const base = `${newestRow?.strategy_name ?? "Strategy"}: ${newestRow?.symbol ?? ""} ${newestRow?.event ?? ""} ${newestRow?.side ?? ""}${ot}`.trim();
 
       // 1) TradingView incoming signal (info)
       const tvMsg = {
@@ -208,14 +235,34 @@ export default function DashboardPage() {
       { accessorKey: "symbol", header: "Symbol" },
       { accessorKey: "event", header: "Event" },
       { accessorKey: "side", header: "Side" },
-      { accessorKey: "signal_price", header: "Signal Price" },
+      {
+        accessorKey: "order_type",
+        header: "Order Type",
+        cell: ({ row }) => (row.original.order_type ? String(row.original.order_type).toUpperCase() : "-")
+      },
+      {
+        accessorKey: "limit_price",
+        header: "Limit",
+        cell: ({ row }) =>
+          row.original.limit_price == null ? "-" : <span className="text-slate-900">{fmtNum(Number(row.original.limit_price), 2)}</span>
+      },
+      {
+        accessorKey: "signal_price",
+        header: "Signal Price",
+        cell: ({ row }) => {
+          const v = row.original.signal_price;
+          if (v == null) return "-";
+          const n = typeof v === "number" ? v : Number(v);
+          return Number.isFinite(n) ? <span className="text-slate-900">{fmtNum(n, 2)}</span> : <span className="text-slate-900">{String(v)}</span>;
+        }
+      },
       { accessorKey: "alpaca_status", header: "Alpaca Status" },
       {
         id: "fill",
         header: "Fill",
         cell: ({ row }) => {
           const r = row.original;
-          if (r.filled_qty != null && r.filled_avg_price != null) return `${r.filled_qty} @ ${r.filled_avg_price}`;
+          if (r.filled_qty != null && r.filled_avg_price != null) return `${fmtNum(r.filled_qty, 2)} @ ${fmtNum(r.filled_avg_price, 2)}`;
           return "-";
         }
       },
@@ -224,6 +271,51 @@ export default function DashboardPage() {
         header: "Error",
         cell: ({ row }) => (row.original.alpaca_error ? <span className="text-red-600">{row.original.alpaca_error}</span> : "-")
       }
+    ],
+    []
+  );
+
+  const ordersColumns = useMemo<ColumnDef<AlpacaOrderRow>[]>(
+    () => [
+      {
+        accessorKey: "submitted_at",
+        header: "Submitted (EST)",
+        cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.submitted_at)}</span>
+      },
+      { accessorKey: "strategy_name", header: "Strategy" },
+      { accessorKey: "symbol", header: "Symbol" },
+      { accessorKey: "side", header: "Side" },
+      {
+        accessorKey: "order_type",
+        header: "Type",
+        cell: ({ row }) => (row.original.order_type ? String(row.original.order_type).toUpperCase() : "-")
+      },
+      {
+        id: "qty_or_notional",
+        header: "Qty/Notional",
+        cell: ({ row }) => {
+          const r = row.original;
+          if (r.qty != null) return <span className="text-slate-900">{fmtNum(r.qty, 2)}</span>;
+          if (r.notional != null) return <span className="text-slate-900">{fmtMoney(r.notional)}</span>;
+          return "-";
+        }
+      },
+      {
+        accessorKey: "limit_price",
+        header: "Target/Limit",
+        cell: ({ row }) => (row.original.limit_price == null ? "-" : <span className="text-slate-900">{fmtNum(row.original.limit_price, 2)}</span>)
+      },
+      {
+        accessorKey: "filled_avg_price",
+        header: "Filled @",
+        cell: ({ row }) => (row.original.filled_avg_price == null ? "-" : <span className="text-slate-900">{fmtNum(row.original.filled_avg_price, 2)}</span>)
+      },
+      {
+        accessorKey: "filled_qty",
+        header: "Filled Qty",
+        cell: ({ row }) => (row.original.filled_qty == null ? "-" : <span className="text-slate-900">{fmtNum(row.original.filled_qty, 2)}</span>)
+      },
+      { accessorKey: "status", header: "Status" }
     ],
     []
   );
@@ -426,6 +518,20 @@ export default function DashboardPage() {
             <div className="text-sm text-slate-600">Loading…</div>
           ) : (
             <DataTable data={tx} columns={txColumns} pageSize={200} searchPlaceholder="Search activity…" />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Orders (Open first)</CardTitle>
+          <CardDescription>Alpaca order history, sorted so open/unfilled orders show first.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="text-sm text-slate-600">Loading…</div>
+          ) : (
+            <DataTable data={orders} columns={ordersColumns} pageSize={200} searchPlaceholder="Search orders…" />
           )}
         </CardContent>
       </Card>

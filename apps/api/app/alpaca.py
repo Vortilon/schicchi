@@ -77,6 +77,102 @@ def _extract_error_dict_from_exception(exc: Exception) -> dict[str, Any] | None:
         return None
 
 
+def _fmt_2(v: Any) -> str:
+    """
+    Best-effort formatting for quantities/prices to 2 decimals.
+    Accepts strings or numbers; returns original string if not parseable.
+    """
+    if v is None:
+        return ""
+    if isinstance(v, (int, float)):
+        return f"{float(v):.2f}"
+    if isinstance(v, str):
+        try:
+            return f"{float(v):.2f}"
+        except Exception:
+            return v
+    return str(v)
+
+
+def format_alpaca_error_dict(
+    err: dict[str, Any],
+    *,
+    symbol: str | None = None,
+    side: str | None = None,
+    qty: float | None = None,
+    notional: float | None = None,
+) -> str:
+    code = err.get("code")
+    msg = err.get("message") or "order rejected"
+    err_symbol = err.get("symbol") or symbol
+
+    bits: list[str] = []
+    if side:
+        bits.append(str(side).upper())
+    if err_symbol:
+        bits.append(str(err_symbol))
+    prefix = " ".join(bits).strip()
+    prefix = (prefix + ": ") if prefix else ""
+
+    requested = err.get("requested")
+    available = err.get("available")
+    existing_qty = err.get("existing_qty")
+    held_for_orders = err.get("held_for_orders")
+
+    requested_fallback: Any | None = None
+    if qty is not None:
+        requested_fallback = _fmt_2(qty)
+    elif notional is not None:
+        requested_fallback = f"${float(notional):.2f}"
+
+    details: list[str] = []
+    if requested is not None or requested_fallback is not None:
+        details.append(f"requested {_fmt_2(requested) if requested is not None else requested_fallback}")
+    if available is not None:
+        details.append(f"available {_fmt_2(available)}")
+    if existing_qty is not None:
+        details.append(f"held {_fmt_2(existing_qty)}")
+    if held_for_orders is not None:
+        details.append(f"held_for_orders {_fmt_2(held_for_orders)}")
+    if code is not None:
+        details.append(f"code {code}")
+
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"{prefix}{msg}{suffix}"
+
+
+def format_alpaca_error_message(
+    error_message: str | None,
+    *,
+    symbol: str | None = None,
+    side: str | None = None,
+) -> str | None:
+    """
+    If error_message contains a JSON/dict error payload, return a concise formatted message.
+    Otherwise return it unchanged.
+    """
+    if not error_message:
+        return error_message
+
+    text = error_message.strip()
+    # Fast path: looks like JSON/dict
+    if not (text.startswith("{") and text.endswith("}")):
+        return error_message
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return format_alpaca_error_dict(parsed, symbol=symbol, side=side)
+    except Exception:
+        pass
+    try:
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, dict):
+            return format_alpaca_error_dict(parsed, symbol=symbol, side=side)
+    except Exception:
+        pass
+    return error_message
+
+
 def format_alpaca_error(
     exc: Exception,
     *,
@@ -93,46 +189,7 @@ def format_alpaca_error(
         # Keep it short; the dashboard is a table cell.
         return (str(exc) or exc.__class__.__name__), None
 
-    code = err.get("code")
-    msg = err.get("message") or "order rejected"
-    err_symbol = err.get("symbol") or symbol
-
-    # Include context the user cares about most for sizing/qty issues.
-    bits: list[str] = []
-    if side:
-        bits.append(str(side).upper())
-    if err_symbol:
-        bits.append(str(err_symbol))
-    prefix = " ".join(bits).strip()
-    prefix = (prefix + ": ") if prefix else ""
-
-    # Known Alpaca error fields we commonly see.
-    requested = err.get("requested")
-    available = err.get("available")
-    existing_qty = err.get("existing_qty")
-    held_for_orders = err.get("held_for_orders")
-
-    # If Alpaca didn't provide requested, fall back to our order intent values.
-    requested_fallback = None
-    if qty is not None:
-        requested_fallback = qty
-    elif notional is not None:
-        requested_fallback = f"${notional}"
-
-    details: list[str] = []
-    if requested is not None or requested_fallback is not None:
-        details.append(f"requested {requested if requested is not None else requested_fallback}")
-    if available is not None:
-        details.append(f"available {available}")
-    if existing_qty is not None:
-        details.append(f"held {existing_qty}")
-    if held_for_orders is not None:
-        details.append(f"held_for_orders {held_for_orders}")
-    if code is not None:
-        details.append(f"code {code}")
-
-    suffix = f" ({', '.join(details)})" if details else ""
-    return f"{prefix}{msg}{suffix}", err
+    return format_alpaca_error_dict(err, symbol=symbol, side=side, qty=qty, notional=notional), err
 
 
 def submit_order(
@@ -176,6 +233,9 @@ def submit_order(
     return {
         "id": str(order.id),
         "status": str(order.status),
+        "order_type": _jsonable(getattr(order, "order_type", None)),
+        "time_in_force": _jsonable(getattr(order, "time_in_force", None)),
+        "limit_price": _jsonable(getattr(order, "limit_price", None)),
         "submitted_at": _jsonable(getattr(order, "submitted_at", None)),
         "filled_at": _jsonable(getattr(order, "filled_at", None)),
         "filled_avg_price": _jsonable(getattr(order, "filled_avg_price", None)),

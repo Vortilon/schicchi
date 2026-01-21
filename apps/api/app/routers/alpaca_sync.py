@@ -6,11 +6,11 @@ from typing import Any
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetOrdersRequest
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from sqlmodel import Session, select
 
 from ..db import engine
-from ..models import Fill, Order, Position
+from ..models import Fill, Order, Position, Strategy
 from ..settings import settings
 
 router = APIRouter()
@@ -151,4 +151,75 @@ def sync_alpaca() -> dict[str, Any]:
         s.commit()
 
     return {"ok": True, "updated_orders": updated_orders, "new_fills": new_fills}
+
+
+def _is_open_status(status: str | None) -> bool:
+    if not status:
+        return True
+    s = str(status).lower()
+    return s not in {"filled", "canceled", "cancelled", "rejected", "expired"}
+
+
+@router.get("/alpaca/orders")
+def alpaca_orders(
+    status: str = Query(default="all"),  # all|open|closed
+    limit: int = Query(default=200, ge=1, le=500),
+    after_days: int = Query(default=10, ge=1, le=90),
+) -> list[dict[str, Any]]:
+    """
+    List Alpaca orders, sorted with open/unfilled first.
+    Adds strategy info by mapping Alpaca client_order_id -> DB Order/Strategy.
+    """
+    c = _client()
+    since = datetime.now(timezone.utc) - timedelta(days=after_days)
+    req = GetOrdersRequest(status=status, after=since, limit=limit)
+    orders = c.get_orders(filter=req)
+
+    with Session(engine) as s:
+        db_orders = list(s.exec(select(Order)))
+        by_trade = {o.trade_id: o for o in db_orders if o.trade_id}
+        strategies = {st.id: st for st in s.exec(select(Strategy))}
+
+    out: list[dict[str, Any]] = []
+    for o in orders:
+        client_order_id = getattr(o, "client_order_id", None)
+        db = by_trade.get(client_order_id) if client_order_id else None
+        st = strategies.get(db.strategy_id) if db else None
+
+        def f(v: Any) -> float | None:
+            try:
+                return float(v) if v is not None else None
+            except Exception:
+                return None
+
+        out.append(
+            {
+                "alpaca_order_id": str(getattr(o, "id", "")),
+                "client_order_id": client_order_id,
+                "strategy_id": db.strategy_id if db else None,
+                "strategy_name": st.name if st else (db.strategy_id if db else None),
+                "symbol": getattr(o, "symbol", None),
+                "side": str(getattr(o, "side", "")) if getattr(o, "side", None) is not None else None,
+                "order_type": str(getattr(o, "order_type", "")) if getattr(o, "order_type", None) is not None else None,
+                "time_in_force": str(getattr(o, "time_in_force", "")) if getattr(o, "time_in_force", None) is not None else None,
+                "status": str(getattr(o, "status", "")) if getattr(o, "status", None) is not None else None,
+                "qty": f(getattr(o, "qty", None)),
+                "notional": f(getattr(o, "notional", None)),
+                "limit_price": f(getattr(o, "limit_price", None)),
+                "stop_price": f(getattr(o, "stop_price", None)),
+                "filled_qty": f(getattr(o, "filled_qty", None)),
+                "filled_avg_price": f(getattr(o, "filled_avg_price", None)),
+                "submitted_at": getattr(o, "submitted_at", None).isoformat() if getattr(o, "submitted_at", None) else None,
+                "filled_at": getattr(o, "filled_at", None).isoformat() if getattr(o, "filled_at", None) else None,
+            }
+        )
+
+    # Open/unfilled first, then newest first.
+    def sort_key(r: dict[str, Any]):
+        open_first = 0 if _is_open_status(r.get("status")) else 1
+        t = r.get("submitted_at") or ""
+        return (open_first, t)
+
+    out.sort(key=sort_key)
+    return out
 

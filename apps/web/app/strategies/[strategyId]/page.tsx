@@ -17,6 +17,9 @@ type TradeRow = {
   event: string | null;
   signal_time: string | null;
   signal_price: number | string | null;
+  order_type?: string | null;
+  limit_price?: number | string | null;
+  time_in_force?: string | null;
   order: {
     status: string | null;
     qty: number | null;
@@ -146,11 +149,35 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
       { accessorKey: "event", header: "Event" },
       { accessorKey: "side", header: "Side" },
       {
+        accessorKey: "order_type",
+        header: "Order Type",
+        cell: ({ row }) => (row.original.order_type ? String(row.original.order_type).toUpperCase() : "-")
+      },
+      {
+        accessorKey: "limit_price",
+        header: "Limit",
+        cell: ({ row }) => {
+          const v = row.original.limit_price;
+          if (v == null) return "-";
+          const n = typeof v === "number" ? v : Number(v);
+          return Number.isFinite(n) ? <span className="text-slate-900">{fmtNum(n, 2)}</span> : <span className="text-slate-900">{String(v)}</span>;
+        }
+      },
+      {
         accessorKey: "signal_time",
         header: "Signal Time (EST)",
         cell: ({ row }) => <span className="text-slate-900">{fmtTimeEST(row.original.signal_time)}</span>
       },
-      { accessorKey: "signal_price", header: "Signal Price" },
+      {
+        accessorKey: "signal_price",
+        header: "Signal Price",
+        cell: ({ row }) => {
+          const v = row.original.signal_price;
+          if (v == null) return "-";
+          const n = typeof v === "number" ? v : Number(v);
+          return Number.isFinite(n) ? <span className="text-slate-900">{fmtNum(n, 2)}</span> : <span className="text-slate-900">{String(v)}</span>;
+        }
+      },
       {
         id: "qty_or_notional",
         header: "Qty/Notional",
@@ -173,7 +200,7 @@ export default function StrategyDetailPage({ params }: { params: { strategyId: s
         cell: ({ row }) => {
           const o = row.original.order;
           if (!o) return "-";
-          if (o.filled_qty != null && o.filled_avg_price != null) return `${o.filled_qty} @ ${o.filled_avg_price}`;
+          if (o.filled_qty != null && o.filled_avg_price != null) return `${fmtNum(o.filled_qty, 2)} @ ${fmtNum(o.filled_avg_price, 2)}`;
           return "-";
         }
       },
