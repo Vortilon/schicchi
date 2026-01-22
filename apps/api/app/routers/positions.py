@@ -47,8 +47,19 @@ def list_positions(strategy_id: str | None = Query(default=None)) -> list[dict[s
     for p in positions:
         st = strategies.get(p.strategy_id)
         a = alpaca_by_symbol.get(p.symbol) if p.strategy_id == "ALPACA" else None
-        eff_qty = (a.get("qty") if a and a.get("qty") is not None else p.qty)
-        eff_avg = (a.get("avg_entry_price") if a and a.get("avg_entry_price") is not None else p.avg_entry_price)
+        # IMPORTANT:
+        # - "ALPACA" rows are *account-level* and must reflect live Alpaca truth.
+        # - DB rows can be stale if a sync hasn't run; do not show phantom positions.
+        if p.strategy_id == "ALPACA":
+            if a is None:
+                eff_qty = 0.0
+                eff_avg = None
+            else:
+                eff_qty = a.get("qty") if a.get("qty") is not None else 0.0
+                eff_avg = a.get("avg_entry_price")
+        else:
+            eff_qty = p.qty
+            eff_avg = p.avg_entry_price
         side = "long" if (eff_qty or 0) > 0 else "short"
         seen.add((p.strategy_id, p.symbol))
         out.append(
@@ -66,7 +77,7 @@ def list_positions(strategy_id: str | None = Query(default=None)) -> list[dict[s
                 "unrealized_pl_usd": a.get("unrealized_pl_usd") if a else None,
                 "unrealized_pl_pct": a.get("unrealized_pl_pct") if a else None,
                 "realized_pl_usd": None,
-                "status": "open" if p.qty != 0 else "flat",
+                "status": "open" if (eff_qty or 0) != 0 else "flat",
             }
         )
 
