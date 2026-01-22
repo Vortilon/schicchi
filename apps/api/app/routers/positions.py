@@ -22,12 +22,16 @@ def list_positions(strategy_id: str | None = Query(default=None)) -> list[dict[s
             sym = getattr(p, "symbol", None)
             if not sym:
                 continue
+            intraday_pl = getattr(p, "unrealized_intraday_pl", None)
+            intraday_plpc = getattr(p, "unrealized_intraday_plpc", None)
             alpaca_by_symbol[str(sym)] = {
                 "qty": float(getattr(p, "qty", 0.0)) if getattr(p, "qty", None) is not None else None,
                 "avg_entry_price": float(getattr(p, "avg_entry_price", 0.0)) if getattr(p, "avg_entry_price", None) else None,
                 "current_price": float(getattr(p, "current_price", 0.0)) if getattr(p, "current_price", None) else None,
                 "unrealized_pl_usd": float(getattr(p, "unrealized_pl", 0.0)) if getattr(p, "unrealized_pl", None) else None,
                 "unrealized_pl_pct": float(getattr(p, "unrealized_plpc", 0.0)) if getattr(p, "unrealized_plpc", None) else None,
+                "intraday_pl_usd": float(intraday_pl) if intraday_pl is not None else None,
+                "intraday_pl_pct": float(intraday_plpc) if intraday_plpc is not None else None,
                 "market_value": float(getattr(p, "market_value", 0.0)) if getattr(p, "market_value", None) else None,
             }
     except Exception:
@@ -76,6 +80,8 @@ def list_positions(strategy_id: str | None = Query(default=None)) -> list[dict[s
                 "current_price": a.get("current_price") if a else None,
                 "unrealized_pl_usd": a.get("unrealized_pl_usd") if a else None,
                 "unrealized_pl_pct": a.get("unrealized_pl_pct") if a else None,
+                "intraday_pl_usd": a.get("intraday_pl_usd") if a else None,
+                "intraday_pl_pct": a.get("intraday_pl_pct") if a else None,
                 "realized_pl_usd": None,
                 "status": "open" if (eff_qty or 0) != 0 else "flat",
             }
@@ -103,6 +109,8 @@ def list_positions(strategy_id: str | None = Query(default=None)) -> list[dict[s
                     "current_price": a.get("current_price"),
                     "unrealized_pl_usd": a.get("unrealized_pl_usd"),
                     "unrealized_pl_pct": a.get("unrealized_pl_pct"),
+                    "intraday_pl_usd": a.get("intraday_pl_usd"),
+                    "intraday_pl_pct": a.get("intraday_pl_pct"),
                     "realized_pl_usd": None,
                     "status": "open",
                 }

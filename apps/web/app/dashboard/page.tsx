@@ -19,6 +19,8 @@ type PositionRow = {
   current_price: number | null;
   unrealized_pl_usd: number | null;
   unrealized_pl_pct: number | null;
+  intraday_pl_usd?: number | null;
+  intraday_pl_pct?: number | null;
   realized_pl_usd: number | null;
   open_time: string;
   last_sync_time: string | null;
@@ -196,13 +198,23 @@ export default function DashboardPage() {
       },
       {
         accessorKey: "unrealized_pl_usd",
-        header: "Unrealized P&L $",
+        header: "P&L (since entry) $",
         cell: ({ row }) => <span className={numClass(row.original.unrealized_pl_usd)}>{fmtMoney(row.original.unrealized_pl_usd)}</span>
       },
       {
         accessorKey: "unrealized_pl_pct",
-        header: "Unrealized P&L %",
+        header: "P&L (since entry) %",
         cell: ({ row }) => <span className={numClass(row.original.unrealized_pl_pct)}>{fmtPct(row.original.unrealized_pl_pct)}</span>
+      },
+      {
+        accessorKey: "intraday_pl_usd",
+        header: "Today P&L $",
+        cell: ({ row }) => <span className={numClass(row.original.intraday_pl_usd)}>{fmtMoney(row.original.intraday_pl_usd)}</span>
+      },
+      {
+        accessorKey: "intraday_pl_pct",
+        header: "Today P&L %",
+        cell: ({ row }) => <span className={numClass(row.original.intraday_pl_pct)}>{fmtPct(row.original.intraday_pl_pct)}</span>
       },
       {
         accessorKey: "realized_pl_usd",
