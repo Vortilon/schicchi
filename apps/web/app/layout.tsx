@@ -11,7 +11,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen">
         <div className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+          <div className="mx-auto flex w-[95vw] max-w-[95vw] items-center justify-between px-6 py-4">
             <div className="flex items-center gap-3">
               <div className="relative h-8 w-8 overflow-hidden rounded-lg border border-slate-200 bg-white">
                 <Image src="/logo.jpeg" alt="Schicchi logo" fill className="object-cover" priority />
@@ -39,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
           </div>
         </div>
-        <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
+        <div className="mx-auto w-[95vw] max-w-[95vw] px-6 py-8">{children}</div>
       </body>
     </html>
   );
